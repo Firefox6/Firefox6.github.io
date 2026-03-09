@@ -285,8 +285,6 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    max-height: 200px;
-    overflow-y: auto;
   }
 
   .log-item {
@@ -534,9 +532,9 @@
         <div class="mg-row">
           <span>Stärke:</span>
           <div class="mg-chips" id="mgChips">
-            <button class="mg-chip" onclick="setMg(4)">4 mg</button>
             <button class="mg-chip" onclick="setMg(6)">6 mg</button>
             <button class="mg-chip" onclick="setMg(10)">10 mg</button>
+            <button class="mg-chip" onclick="setMg(40)">40 mg</button>
           </div>
         </div>
         <div class="btn-row">
@@ -556,8 +554,8 @@
     </div>
 
     <div class="section" style="padding-top:0">
-      <div class="section-title">Heutige Einträge</div>
-      <div class="log-list" id="logList"></div>
+      <div class="section-title">Tipp der Phase</div>
+      <div class="tip-box" id="phaseTip"></div>
     </div>
 
     <div class="section" style="padding-top:0">
@@ -566,8 +564,8 @@
     </div>
 
     <div class="section" style="padding-top:0">
-      <div class="section-title">Tipp der Phase</div>
-      <div class="tip-box" id="phaseTip"></div>
+      <div class="section-title">Heutige Einträge</div>
+      <div class="log-list" id="logList"></div>
     </div>
   </div>
 
@@ -703,7 +701,6 @@ const PLAN = [
   { w: 15, p: 2,  mg: 6,  phase: 'Sommer ↓',  label: 'Letzter Sprint vor Lager' },
   { w: 16, p: 2,  mg: 6,  phase: '🏕 Sommer',  label: 'Sommerlager – Woche 1', event: 'sommer' },
   { w: 17, p: 2,  mg: 6,  phase: '🏕 Sommer',  label: 'Sommerlager – Woche 2', event: 'sommer' },
-  { w: 18, p: 2,  mg: 4,  phase: 'Langziel',  label: 'Nur noch bei Genuss – Zielzustand 🎯', event: 'ziel' },
 ];
 
 const TIPS = {
@@ -805,7 +802,7 @@ function deleteEntry(key, idx) {
 function setMg(val) {
   selectedMg = val;
   document.querySelectorAll('.mg-chip').forEach(c => {
-    c.classList.toggle('active', c.textContent.trim().startsWith(String(val)));
+    c.classList.toggle('active', parseInt(c.textContent.trim()) === val);
   });
 }
 
@@ -829,7 +826,9 @@ function render() {
   // Counter
   const el = document.getElementById('countDisplay');
   el.textContent = count;
-  el.className = 'big-count' + (count > target ? ' over' : count >= target ? ' close' : '');
+  // green = at or below target, orange = 1 over, red = 2+ over
+  const countCls = count >= target + 2 ? ' over' : count === target + 1 ? ' close' : '';
+  el.className = 'big-count' + countCls;
 
   document.getElementById('targetDisplay').textContent = target;
   document.getElementById('mgDisplay').textContent = totalMg;
@@ -838,7 +837,8 @@ function render() {
   const pct  = target > 0 ? Math.min((count / target) * 100, 100) : 0;
   const fill = document.getElementById('progressFill');
   fill.style.width = pct + '%';
-  fill.className = 'progress-bar-fill' + (count > target ? ' over' : count >= target ? ' close' : '');
+  const fillCls = count >= target + 2 ? ' over' : count === target + 1 ? ' close' : '';
+  fill.className = 'progress-bar-fill' + fillCls;
 
   // Log list
   const logEl = document.getElementById('logList');
@@ -848,7 +848,6 @@ function render() {
     logEl.innerHTML = entries.map((e, i) => `
       <div class="log-item">
         <span class="log-num">${i+1}</span>
-        <span class="log-time">${e.time}</span>
         <span style="flex:1">Pouch</span>
         <span class="log-mg">${e.mg || plan.mg} mg</span>
         <button class="log-del" onclick="deleteEntry('${k}', ${i})">✕</button>
@@ -895,9 +894,8 @@ function render() {
   document.getElementById('statAvg').textContent = avg !== null ? avg.toFixed(1) : '—';
 
   // Countdowns – fixed dates
-  // Pfingstlager: end of week 11 = Thursday of week 11
-  const pfingst = new Date(START_DATE); pfingst.setDate(pfingst.getDate() + (11-1)*7 + 3);
-  const sommer  = new Date(START_DATE); sommer.setDate(sommer.getDate() + (16-1)*7);
+  const pfingst = new Date(2026, 4, 23); // 23. Mai 2026
+  const sommer  = new Date(2026, 5, 27); // 27. Juni 2026
   const now = new Date();
   const pDiff = Math.ceil((pfingst - now) / 86400000);
   const sDiff = Math.ceil((sommer  - now) / 86400000);
@@ -999,7 +997,8 @@ function switchTab(page, btn) {
 function initApp() {
   loadData();
   const plan = getPlan(getWeekNum());
-  setMg(plan.mg); // default chip = plan's mg for this week
+  // Default: plan.mg (6 or 10 depending on week). 40mg is never default.
+  setMg(plan.mg);
   render();
 }
 
