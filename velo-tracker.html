@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Velo Tracker</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap');
+
+  :root {
+    --bg: #0f0f0f;
+    --surface: #1a1a1a;
+    --surface2: #222;
+    --border: #2a2a2a;
+    --text: #f0f0f0;
+    --muted: #666;
+    --accent: #c8f060;
+    --accent2: #60c8f0;
+    --warn: #f0a060;
+    --danger: #f06060;
+    --success: #60f0a0;
+    --pfingst: #a060f0;
+    --sommer: #f060a0;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    font-family: 'DM Mono', monospace;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    max-width: 430px;
+    margin: 0 auto;
+    padding-bottom: 100px;
+  }
+
+  .header {
+    padding: 52px 20px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .header-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    line-height: 1;
+  }
+
+  h1 span { color: var(--accent); }
+
+  .week-badge {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-top: 4px;
+  }
+
+  .today-target {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13px;
+  }
+
+  .target-label { color: var(--muted); }
+  .target-val { color: var(--accent); font-weight: 500; margin-left: auto; }
+
+  .section { padding: 20px; }
+  .section + .section { padding-top: 0; }
+
+  .section-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+
+  /* TODAY COUNTER */
+  .counter-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .counter-card::before {
+    content: '';
+    position: absolute;
+    top: -40px; right: -40px;
+    width: 120px; height: 120px;
+    background: radial-gradient(circle, rgba(200,240,96,0.08) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .big-count {
+    font-family: 'Syne', sans-serif;
+    font-size: 72px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -3px;
+    color: var(--accent);
+    transition: all 0.15s;
+  }
+
+  .big-count.over { color: var(--danger); }
+  .big-count.close { color: var(--warn); }
+
+  .count-sub {
+    font-size: 12px;
+    color: var(--muted);
+    margin: 4px 0 20px;
+  }
+
+  .count-sub span { color: var(--text); }
+
+  .btn-row {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+  }
+
+  .btn {
+    border: none;
+    border-radius: 50%;
+    width: 56px;
+    height: 56px;
+    font-size: 26px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.1s, opacity 0.1s;
+    -webkit-appearance: none;
+  }
+
+  .btn:active { transform: scale(0.92); }
+
+  .btn-add {
+    background: var(--accent);
+    color: var(--bg);
+  }
+
+  .btn-remove {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  /* PROGRESS BAR */
+  .progress-wrap {
+    margin-top: 16px;
+  }
+
+  .progress-bar-bg {
+    background: var(--border);
+    border-radius: 4px;
+    height: 6px;
+    overflow: hidden;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: var(--accent);
+    transition: width 0.3s ease, background 0.3s;
+  }
+
+  .progress-bar-fill.over { background: var(--danger); }
+  .progress-bar-fill.close { background: var(--warn); }
+
+  .progress-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  /* HISTORY */
+  .history-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 5px;
+  }
+
+  .day-dot {
+    aspect-ratio: 1;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    gap: 2px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .day-dot.today { border-color: var(--accent); }
+  .day-dot.good { background: rgba(96,240,160,0.12); }
+  .day-dot.warn { background: rgba(240,160,96,0.12); }
+  .day-dot.bad { background: rgba(240,96,96,0.12); }
+  .day-dot.future { opacity: 0.3; }
+
+  .day-dot .day-label { color: var(--muted); }
+  .day-dot .day-count { font-weight: 500; font-size: 12px; }
+  .day-dot.good .day-count { color: var(--success); }
+  .day-dot.warn .day-count { color: var(--warn); }
+  .day-dot.bad .day-count { color: var(--danger); }
+
+  .dot-event {
+    position: absolute;
+    top: 2px; right: 2px;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+  }
+
+  /* PLAN TABLE */
+  .plan-table {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .plan-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 12px;
+    transition: border-color 0.2s;
+  }
+
+  .plan-row.current { border-color: var(--accent); }
+  .plan-row.pfingst { border-color: var(--pfingst); }
+  .plan-row.sommer { border-color: var(--sommer); }
+
+  .plan-week {
+    color: var(--muted);
+    min-width: 52px;
+    font-size: 11px;
+  }
+
+  .plan-desc { flex: 1; }
+  .plan-target {
+    font-family: 'Syne', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .plan-mg { font-size: 10px; color: var(--muted); margin-top: 1px; text-align: right; }
+
+  .event-tag {
+    font-size: 9px;
+    padding: 2px 7px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 500;
+  }
+
+  .tag-pfingst { background: rgba(160,96,240,0.2); color: var(--pfingst); }
+  .tag-sommer { background: rgba(240,96,160,0.2); color: var(--sommer); }
+  .tag-ziel { background: rgba(96,240,160,0.15); color: var(--success); }
+
+  /* STATS */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+  }
+
+  .stat-label { font-size: 10px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; }
+  .stat-val { font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 700; }
+  .stat-sub { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+  /* TABS */
+  .tabs {
+    display: flex;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    position: fixed;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100%;
+    max-width: 430px;
+    z-index: 20;
+  }
+
+  .tab {
+    flex: 1;
+    padding: 12px 8px 20px;
+    border: none;
+    background: none;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    transition: color 0.2s;
+  }
+
+  .tab.active { color: var(--accent); }
+  .tab-icon { font-size: 20px; }
+
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-80px);
+    background: var(--accent);
+    color: var(--bg);
+    padding: 10px 20px;
+    border-radius: 30px;
+    font-size: 13px;
+    font-weight: 500;
+    transition: transform 0.3s ease;
+    z-index: 100;
+    white-space: nowrap;
+  }
+
+  .toast.show { transform: translateX(-50%) translateY(0); }
+
+  .streak-fire { font-size: 18px; }
+
+  .tip-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent2);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--muted);
+    margin-top: 10px;
+  }
+
+  .tip-box strong { color: var(--text); }
+
+  .schedule-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 10px;
+  }
+
+  .schedule-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 12px; }
+
+  .slot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+  .slot:last-child { border-bottom: none; }
+  .slot-time { color: var(--accent); min-width: 50px; }
+  .slot-num { margin-left: auto; color: var(--muted); font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="toast" id="toast"></div>
+
+<div class="header">
+  <div class="header-top">
+    <div>
+      <h1>VELO<span>.</span></h1>
+      <div class="week-badge" id="weekBadge">Woche 1 · Tag 1</div>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:11px;color:var(--muted)">Ziel heute</div>
+      <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:var(--accent)" id="headerTarget">—</div>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE: HEUTE -->
+<div class="page active" id="page-heute">
+  <div class="section">
+    <div class="section-title">Heute</div>
+    <div class="counter-card">
+      <div class="big-count" id="countDisplay">0</div>
+      <div class="count-sub">von <span id="targetDisplay">—</span> Pouches · <span id="mgDisplay">—</span> mg</div>
+      <div class="btn-row">
+        <button class="btn btn-remove" onclick="changeCount(-1)">−</button>
+        <button class="btn btn-add" onclick="changeCount(1)">+</button>
+      </div>
+      <div class="progress-wrap">
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" id="progressFill" style="width:0%"></div>
+        </div>
+        <div class="progress-labels">
+          <span>0</span>
+          <span id="progressLabel">0 / —</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section" style="padding-top:0">
+    <div class="section-title">Letzten 14 Tage</div>
+    <div class="history-grid" id="historyGrid"></div>
+  </div>
+
+  <div class="section" style="padding-top:0">
+    <div class="section-title">Tipp der Phase</div>
+    <div class="tip-box" id="phaseTip"></div>
+  </div>
+</div>
+
+<!-- PAGE: STATS -->
+<div class="page" id="page-stats">
+  <div class="section">
+    <div class="section-title">Übersicht</div>
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">🔥 Streak</div>
+        <div class="stat-val" id="statStreak">0</div>
+        <div class="stat-sub">Tage im Ziel</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">📊 Ø letzte 7T</div>
+        <div class="stat-val" id="statAvg">—</div>
+        <div class="stat-sub">Pouches/Tag</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">🎯 Pfingstlager</div>
+        <div class="stat-val" id="statPfingst">—</div>
+        <div class="stat-sub">Tage weg</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">☀️ Sommerlager</div>
+        <div class="stat-val" id="statSommer">—</div>
+        <div class="stat-sub">Tage weg</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section" style="padding-top:0">
+    <div class="section-title">Heutige Zeitplan-Empfehlung</div>
+    <div class="schedule-box" id="scheduleBox"></div>
+  </div>
+</div>
+
+<!-- PAGE: PLAN -->
+<div class="page" id="page-plan">
+  <div class="section">
+    <div class="section-title">Reduktionsplan</div>
+    <div class="plan-table" id="planTable"></div>
+  </div>
+</div>
+
+<!-- TABS -->
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('heute', this)">
+    <span class="tab-icon">○</span>
+    Heute
+  </button>
+  <button class="tab" onclick="switchTab('stats', this)">
+    <span class="tab-icon">◈</span>
+    Stats
+  </button>
+  <button class="tab" onclick="switchTab('plan', this)">
+    <span class="tab-icon">≡</span>
+    Plan
+  </button>
+</div>
+
+<script>
+// ─── CONFIG ───────────────────────────────────────────────
+const START_DATE = (() => {
+  // Monday of current week (Week 1 = this week)
+  const d = new Date();
+  const day = d.getDay(); // 0=Sun
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  d.setDate(diff);
+  d.setHours(0,0,0,0);
+  return d;
+})();
+
+// Plan: week number → { pouches, mg, label, phase }
+const PLAN = [
+  { w: 1,  p: 8,  mg: 10, phase: 'Struktur', label: 'Feste Zeiten einführen, Menge leicht runter' },
+  { w: 2,  p: 7,  mg: 10, phase: 'Struktur', label: 'Timing stabilisieren' },
+  { w: 3,  p: 7,  mg: 6,  phase: 'Stärke ↓', label: 'Wechsel auf 6 mg Pouches' },
+  { w: 4,  p: 6,  mg: 6,  phase: 'Stärke ↓', label: 'Körper an 6 mg gewöhnen' },
+  { w: 5,  p: 6,  mg: 6,  phase: 'Menge ↓',  label: 'Erste Reduktion der Anzahl' },
+  { w: 6,  p: 5,  mg: 6,  phase: 'Menge ↓',  label: 'Samstag-Simulation: 3 Pouches' },
+  { w: 7,  p: 5,  mg: 6,  phase: 'Menge ↓',  label: 'Konsistenz aufbauen' },
+  { w: 8,  p: 4,  mg: 6,  phase: 'Menge ↓',  label: 'Lagerniveau anpeilen' },
+  { w: 9,  p: 4,  mg: 6,  phase: 'Lager-fit', label: '2× Woche Lager-Simulation (3/Tag)' },
+  { w: 10, p: 3,  mg: 6,  phase: 'Lager-fit', label: 'Pfingstlager-Ziel erreicht ✓' },
+  { w: 11, p: 3,  mg: 6,  phase: '⛺ Pfingst', label: 'Pfingstlager', event: 'pfingst', end: true },
+  { w: 12, p: 3,  mg: 6,  phase: 'Lager-fit', label: 'Nach Pfingsten: Niveau halten' },
+  { w: 13, p: 3,  mg: 6,  phase: 'Lager-fit', label: 'Weiter stabilisieren' },
+  { w: 14, p: 2,  mg: 6,  phase: 'Sommer ↓', label: 'Auf Sommerlager-Ziel zubewegen' },
+  { w: 15, p: 2,  mg: 6,  phase: 'Sommer ↓', label: 'Letzter Sprint vor Lager' },
+  { w: 16, p: 2,  mg: 6,  phase: '🏕 Sommer', label: 'Sommerlager – Woche 1', event: 'sommer' },
+  { w: 17, p: 2,  mg: 6,  phase: '🏕 Sommer', label: 'Sommerlager – Woche 2', event: 'sommer', end: true },
+  { w: 18, p: 2,  mg: 4,  phase: 'Langziel', label: 'Nur noch bei Genuss – Zielzustand 🎯', event: 'ziel' },
+];
+
+const TIPS = {
+  'Struktur': '<strong>Phase: Struktur.</strong> Noch vor der Mengereduktion – leg feste Uhrzeiten fest. Kein Greifen nach Gefühl. Warte nach dem Drang 5–10 Min: er geht fast immer weg.',
+  'Stärke ↓': '<strong>Phase: Stärke runter.</strong> 6 mg statt 10 mg – selbe Anzahl. Die ersten 4–5 Tage spürst du mehr Drang, dann normalisiert es sich. Tipp: 10 mg morgens behalten, 6 mg tagsüber.',
+  'Menge ↓':  '<strong>Phase: Anzahl runter.</strong> Jeden Samstag Lager simulieren: nur 3 Pouches, zu festen Zeiten. Kaugummi (nikotinfrei) hilft gegen den oralen Drang.',
+  'Lager-fit': '<strong>Phase: Lager-fit.</strong> Du bist nah am Lagerziel. Weiter Samstags simulieren. Kaltes Wasser trinken wenn der Drang kommt – funktioniert überraschend gut.',
+  '⛺ Pfingst': '<strong>Pfingstlager.</strong> Du schaffst das. Max. 3 Pouches, zu festen Zeiten (Morgen / Mittag / Abend). Plane sie bewusst ein.',
+  'Sommer ↓': '<strong>Fast geschafft.</strong> Nur noch 2 Pouches pro Tag – Genuss, nicht Notwendigkeit.',
+  '🏕 Sommer': '<strong>Sommerlager.</strong> 2 Pouches/Tag. Du hast 4 Monate Arbeit dahinter – du weißt wie\'s geht.',
+  'Langziel':  '<strong>Zielzustand erreicht.</strong> Nikotin als Genussmittel, nicht als Pflicht. 🎉',
+};
+
+const SCHEDULES = {
+  8: ['07:00','09:00','11:00','13:00','15:00','17:00','19:00','21:00'],
+  7: ['07:00','09:30','12:00','14:30','17:00','19:30','21:30'],
+  6: ['07:00','10:00','13:00','16:00','19:00','21:30'],
+  5: ['07:30','11:00','14:00','17:30','21:00'],
+  4: ['08:00','12:00','16:00','21:00'],
+  3: ['08:00','13:00','20:00'],
+  2: ['09:00','20:00'],
+};
+
+// ─── STATE ────────────────────────────────────────────────
+let data = JSON.parse(localStorage.getItem('veloData') || '{}');
+
+function todayKey() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function getWeekNum() {
+  const now = new Date(); now.setHours(0,0,0,0);
+  const diff = now - START_DATE;
+  return Math.floor(diff / (7 * 86400000)) + 1;
+}
+
+function getDayNum() {
+  const now = new Date(); now.setHours(0,0,0,0);
+  const diff = now - START_DATE;
+  const dayOfWeek = Math.floor(diff / 86400000) % 7;
+  return dayOfWeek + 1; // 1=Mon
+}
+
+function getPlan(weekNum) {
+  return PLAN.find(p => p.w === weekNum) || PLAN[PLAN.length - 1];
+}
+
+function todayCount() {
+  return data[todayKey()] ?? 0;
+}
+
+// ─── UI ───────────────────────────────────────────────────
+function render() {
+  const week = getWeekNum();
+  const plan = getPlan(week);
+  const count = todayCount();
+  const target = plan.p;
+  const dayNames = ['Mo','Di','Mi','Do','Fr','Sa','So'];
+
+  // Header
+  document.getElementById('weekBadge').textContent = `Woche ${week} · ${dayNames[getDayNum()-1]}`;
+  document.getElementById('headerTarget').textContent = target;
+
+  // Count display
+  const el = document.getElementById('countDisplay');
+  el.textContent = count;
+  el.className = 'big-count' + (count > target ? ' over' : count >= target - 1 ? ' close' : '');
+
+  document.getElementById('targetDisplay').textContent = target;
+  document.getElementById('mgDisplay').textContent = `${count * plan.mg}`;
+  document.getElementById('progressLabel').textContent = `${count} / ${target}`;
+
+  const pct = Math.min((count / target) * 100, 100);
+  const fill = document.getElementById('progressFill');
+  fill.style.width = pct + '%';
+  fill.className = 'progress-bar-fill' + (count > target ? ' over' : count >= target - 1 ? ' close' : '');
+
+  // History grid (last 14 days)
+  const grid = document.getElementById('historyGrid');
+  grid.innerHTML = '';
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const key = d.toISOString().split('T')[0];
+    const dayW = Math.floor((d - START_DATE) / (7 * 86400000)) + 1;
+    const dayPlan = getPlan(dayW);
+    const val = data[key];
+    const isToday = i === 0;
+    const isFuture = i < 0;
+    const dayOfWeek = (d.getDay() + 6) % 7; // 0=Mon
+
+    let cls = 'day-dot';
+    if (isToday) cls += ' today';
+    if (isFuture) cls += ' future';
+    if (val !== undefined && !isFuture) {
+      if (val <= dayPlan.p) cls += ' good';
+      else if (val <= dayPlan.p + 2) cls += ' warn';
+      else cls += ' bad';
+    }
+
+    const dot = document.createElement('div');
+    dot.className = cls;
+    dot.innerHTML = `<span class="day-label">${dayNames[dayOfWeek]}</span><span class="day-count">${val !== undefined ? val : '·'}</span>`;
+    grid.appendChild(dot);
+  }
+
+  // Tip
+  document.getElementById('phaseTip').innerHTML = TIPS[plan.phase] || '';
+
+  // Stats
+  const streak = calcStreak();
+  document.getElementById('statStreak').textContent = streak;
+
+  const last7 = calcAvg(7);
+  document.getElementById('statAvg').textContent = last7 !== null ? last7.toFixed(1) : '—';
+
+  const pfingstDay = new Date(START_DATE); pfingstDay.setDate(pfingstDay.getDate() + (11-1)*7 + 4); // week 11 Thursday
+  const sommerDay = new Date(START_DATE); sommerDay.setDate(sommerDay.getDate() + (16-1)*7);
+  const now = new Date();
+  const pfingstDiff = Math.ceil((pfingstDay - now) / 86400000);
+  const sommerDiff = Math.ceil((sommerDay - now) / 86400000);
+  document.getElementById('statPfingst').textContent = pfingstDiff > 0 ? pfingstDiff : '🏕';
+  document.getElementById('statSommer').textContent = sommerDiff > 0 ? sommerDiff : '☀️';
+
+  // Schedule
+  const sched = SCHEDULES[target] || SCHEDULES[3];
+  let html = `<div class="schedule-title">Empfohlene Zeiten (${target} Pouches)</div>`;
+  sched.forEach((time, i) => {
+    html += `<div class="slot"><span class="slot-time">${time}</span><span>Pouch ${i+1}</span></div>`;
+  });
+  document.getElementById('scheduleBox').innerHTML = html;
+
+  // Plan table
+  const planTable = document.getElementById('planTable');
+  planTable.innerHTML = '';
+  PLAN.forEach(row => {
+    const isCurrent = row.w === week;
+    let cls = 'plan-row';
+    if (isCurrent) cls += ' current';
+    if (row.event === 'pfingst') cls += ' pfingst';
+    if (row.event === 'sommer') cls += ' sommer';
+
+    let tag = '';
+    if (row.event === 'pfingst') tag = '<span class="event-tag tag-pfingst">Pfingst</span>';
+    if (row.event === 'sommer') tag = '<span class="event-tag tag-sommer">Sommer</span>';
+    if (row.event === 'ziel') tag = '<span class="event-tag tag-ziel">Ziel</span>';
+
+    planTable.innerHTML += `
+      <div class="${cls}">
+        <div class="plan-week">Wo ${row.w}</div>
+        <div class="plan-desc">${row.label}</div>
+        <div>
+          <div class="plan-target" style="color:${isCurrent ? 'var(--accent)' : 'var(--text)'}">${row.p}</div>
+          <div class="plan-mg">${row.mg} mg</div>
+          ${tag}
+        </div>
+      </div>
+    `;
+  });
+}
+
+function calcStreak() {
+  let streak = 0;
+  let d = new Date();
+  d.setHours(0,0,0,0);
+  while (true) {
+    const key = d.toISOString().split('T')[0];
+    const dayW = Math.floor((d - START_DATE) / (7 * 86400000)) + 1;
+    const plan = getPlan(dayW);
+    const val = data[key];
+    if (val === undefined) break;
+    if (val > plan.p) break;
+    streak++;
+    d.setDate(d.getDate() - 1);
+  }
+  return streak;
+}
+
+function calcAvg(days) {
+  const vals = [];
+  const d = new Date();
+  for (let i = 0; i < days; i++) {
+    const key = d.toISOString().split('T')[0];
+    if (data[key] !== undefined) vals.push(data[key]);
+    d.setDate(d.getDate() - 1);
+  }
+  if (!vals.length) return null;
+  return vals.reduce((a,b) => a+b, 0) / vals.length;
+}
+
+function changeCount(delta) {
+  const key = todayKey();
+  const current = data[key] ?? 0;
+  const next = Math.max(0, current + delta);
+  data[key] = next;
+  localStorage.setItem('veloData', JSON.stringify(data));
+
+  if (delta > 0) {
+    const week = getWeekNum();
+    const plan = getPlan(week);
+    if (next === plan.p) showToast('🎯 Tagesziel erreicht!');
+    else if (next === plan.p + 1) showToast('⚠️ Über dem Ziel');
+  }
+
+  render();
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+function switchTab(page, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  btn.classList.add('active');
+}
+
+// Init
+render();
+</script>
+</body>
+</html>
