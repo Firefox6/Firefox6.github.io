@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Velo Tracker</title>
+<title>Kaltschnauze</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap');
 
@@ -37,78 +37,7 @@
     padding-bottom: 100px;
   }
 
-  /* GATE */
-  #gate {
-    position: fixed; inset: 0;
-    background: var(--bg);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 18px;
-    z-index: 999;
-    padding: 40px;
-  }
-
-  #gate .gate-title {
-    font-family: 'Syne', sans-serif;
-    font-size: 36px;
-    font-weight: 800;
-    letter-spacing: -2px;
-  }
-
-  #gate .gate-title span { color: var(--accent); }
-  #gate p { font-size: 12px; color: var(--muted); text-align: center; line-height: 1.6; }
-
-  #pwInput {
-    width: 100%;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px 18px;
-    font-family: 'DM Mono', monospace;
-    font-size: 20px;
-    color: var(--text);
-    text-align: center;
-    letter-spacing: 6px;
-    outline: none;
-    transition: border-color 0.2s;
-    -webkit-appearance: none;
-  }
-
-  #pwInput:focus { border-color: var(--accent); }
-
-  #pwInput.shake { animation: shake 0.4s ease; border-color: var(--danger); }
-
-  @keyframes shake {
-    0%,100%{transform:translateX(0)}
-    20%{transform:translateX(-8px)}
-    40%{transform:translateX(8px)}
-    60%{transform:translateX(-5px)}
-    80%{transform:translateX(5px)}
-  }
-
-  #pwBtn {
-    width: 100%;
-    background: var(--accent);
-    color: var(--bg);
-    border: none;
-    border-radius: 12px;
-    padding: 16px;
-    font-family: 'Syne', sans-serif;
-    font-size: 16px;
-    font-weight: 700;
-    cursor: pointer;
-    letter-spacing: 1px;
-    -webkit-appearance: none;
-    transition: opacity 0.15s;
-  }
-
-  #pwBtn:active { opacity: 0.8; }
-  #pwError { font-size: 12px; color: var(--danger); min-height: 16px; }
-
-  /* APP */
-  #app { display: none; }
+  #app { display: block; }
 
   .header {
     padding: 52px 20px 16px;
@@ -127,7 +56,7 @@
 
   h1 {
     font-family: 'Syne', sans-serif;
-    font-size: 28px;
+    font-size: 26px;
     font-weight: 800;
     letter-spacing: -1px;
     line-height: 1;
@@ -211,15 +140,15 @@
     flex-wrap: wrap;
   }
 
-  .mg-chips { display: flex; gap: 6px; }
+  .mg-chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
 
   .mg-chip {
-    padding: 5px 12px;
+    padding: 5px 10px;
     border-radius: 20px;
     border: 1px solid var(--border);
     background: var(--surface2);
     font-family: 'DM Mono', monospace;
-    font-size: 12px;
+    font-size: 11px;
     color: var(--muted);
     cursor: pointer;
     transition: all 0.15s;
@@ -299,7 +228,6 @@
   }
 
   .log-num  { color: var(--muted); min-width: 20px; }
-  .log-time { color: var(--muted); min-width: 44px; }
   .log-mg   { margin-left: auto; color: var(--accent2); }
 
   .log-del {
@@ -347,6 +275,22 @@
   .day-dot.warn .day-count { color: var(--warn); }
   .day-dot.bad  .day-count { color: var(--danger); }
 
+  /* TIP */
+  .tip-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent2);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--muted);
+  }
+
+  .tip-box strong { color: var(--text); }
+  .tip-box ul { margin: 6px 0 0 14px; }
+  .tip-box li { margin-bottom: 3px; }
+
   /* STATS */
   .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
@@ -357,43 +301,64 @@
     padding: 14px;
   }
 
+  .stat-card.full { grid-column: 1 / -1; }
+
   .stat-label { font-size: 10px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; }
   .stat-val   { font-family: 'Syne', sans-serif; font-size: 26px; font-weight: 700; }
   .stat-sub   { font-size: 10px; color: var(--muted); margin-top: 2px; }
 
-  .schedule-box {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px;
-  }
-
-  .schedule-title { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 12px; }
-
-  .slot {
+  .week-compare {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 7px 0;
-    border-bottom: 1px solid var(--border);
-    font-size: 13px;
+    margin-top: 6px;
   }
 
-  .slot:last-child { border-bottom: none; }
-  .slot-time { color: var(--accent); min-width: 52px; }
+  .wc-bar-wrap { flex: 1; }
+  .wc-label { font-size: 10px; color: var(--muted); margin-bottom: 3px; }
+  .wc-bar-bg { background: var(--border); border-radius: 3px; height: 6px; overflow: hidden; }
+  .wc-bar-fill { height: 100%; border-radius: 3px; transition: width 0.4s; }
+  .wc-val { font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 700; min-width: 18px; text-align: right; }
 
-  .tip-box {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--accent2);
-    border-radius: 10px;
-    padding: 12px 14px;
-    font-size: 12px;
-    line-height: 1.6;
+  .trend-arrow { font-size: 18px; }
+
+  .day-type-row {
+    display: flex;
+    gap: 3px;
+    margin-top: 8px;
+    align-items: flex-end;
+    height: 32px;
+  }
+
+  .dt-bar {
+    flex: 1;
+    border-radius: 3px 3px 0 0;
+    min-height: 3px;
+    transition: height 0.3s;
+  }
+
+  .dt-legend {
+    display: flex;
+    gap: 10px;
+    margin-top: 6px;
+    font-size: 10px;
     color: var(--muted);
   }
 
-  .tip-box strong { color: var(--text); }
+  .dt-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 3px;
+  }
+
+  .progress-next {
+    margin-top: 8px;
+  }
+
+  .pn-bar-bg { background: var(--border); border-radius: 4px; height: 8px; overflow: hidden; margin-bottom: 4px; }
+  .pn-bar-fill { height: 100%; border-radius: 4px; background: var(--accent); transition: width 0.4s; }
+  .pn-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
 
   /* PLAN */
   .plan-table { display: flex; flex-direction: column; gap: 6px; }
@@ -431,7 +396,6 @@
 
   .tag-pfingst { background: rgba(160,96,240,0.2); color: var(--pfingst); }
   .tag-sommer  { background: rgba(240,96,160,0.2); color: var(--sommer); }
-  .tag-ziel    { background: rgba(96,240,160,0.15); color: var(--success); }
 
   /* TABS */
   .tabs {
@@ -493,23 +457,13 @@
 </head>
 <body>
 
-<!-- GATE -->
-<div id="gate">
-  <div class="gate-title">VELO<span>.</span></div>
-  <p>Erstes Mal: Passwort wählen.<br>Danach: gleich eintippen zum Entsperren.</p>
-  <input type="password" id="pwInput" placeholder="••••••" autocomplete="current-password" />
-  <div id="pwError"></div>
-  <button id="pwBtn" onclick="checkPassword()">Entsperren</button>
-</div>
-
-<!-- APP -->
 <div id="app">
   <div class="toast" id="toast"></div>
 
   <div class="header">
     <div class="header-top">
       <div>
-        <h1>VELO<span>.</span></h1>
+        <h1>KALT<span>SCHNAUZE</span></h1>
         <div class="week-badge" id="weekBadge">—</div>
       </div>
       <div class="header-right">
@@ -532,7 +486,8 @@
         <div class="mg-row">
           <span>Stärke:</span>
           <div class="mg-chips" id="mgChips">
-            <button class="mg-chip" onclick="setMg(6)">6 mg</button>
+            <button class="mg-chip" onclick="setMg(4)">4 mg</button>
+            <button class="mg-chip" onclick="setMg(8)">2× 4 mg</button>
             <button class="mg-chip" onclick="setMg(10)">10 mg</button>
             <button class="mg-chip" onclick="setMg(40)">40 mg</button>
           </div>
@@ -574,16 +529,18 @@
     <div class="section">
       <div class="section-title">Übersicht</div>
       <div class="stats-grid">
+
         <div class="stat-card">
           <div class="stat-label">🔥 Streak</div>
           <div class="stat-val" id="statStreak">0</div>
           <div class="stat-sub">Tage im Ziel</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">📊 Ø Pouches</div>
-          <div class="stat-val" id="statAvg">—</div>
-          <div class="stat-sub">letzte 7 Tage</div>
+          <div class="stat-label">🏆 Bester Streak</div>
+          <div class="stat-val" id="statBestStreak">0</div>
+          <div class="stat-sub">Tage</div>
         </div>
+
         <div class="stat-card">
           <div class="stat-label">⛺ Pfingsten</div>
           <div class="stat-val" id="statPfingst">—</div>
@@ -594,21 +551,57 @@
           <div class="stat-val" id="statSommer">—</div>
           <div class="stat-sub">Tage weg</div>
         </div>
+
         <div class="stat-card">
           <div class="stat-label">💊 Ø mg/Tag</div>
           <div class="stat-val" id="statMg">—</div>
           <div class="stat-sub">letzte 7 Tage</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">📅 Getrackt</div>
-          <div class="stat-val" id="statDays">0</div>
-          <div class="stat-sub">Tage total</div>
+          <div class="stat-label">📦 Gesparte Pouches</div>
+          <div class="stat-val" id="statSaved">—</div>
+          <div class="stat-sub">vs. 10/Tag früher</div>
         </div>
+
+        <!-- Wochenvergleich -->
+        <div class="stat-card full">
+          <div class="stat-label">📊 Wochenvergleich</div>
+          <div class="week-compare" id="weekCompare">
+            <div class="wc-bar-wrap">
+              <div class="wc-label">Letzte Woche</div>
+              <div class="wc-bar-bg"><div class="wc-bar-fill" id="wcBarLast" style="width:0%;background:var(--muted)"></div></div>
+            </div>
+            <div class="wc-val" id="wcValLast">—</div>
+            <div class="trend-arrow" id="wcArrow">→</div>
+            <div class="wc-bar-wrap">
+              <div class="wc-label">Diese Woche</div>
+              <div class="wc-bar-bg"><div class="wc-bar-fill" id="wcBarThis" style="width:0%;background:var(--accent)"></div></div>
+            </div>
+            <div class="wc-val" id="wcValThis">—</div>
+          </div>
+        </div>
+
+        <!-- Fortschritt zum nächsten Ziel -->
+        <div class="stat-card full">
+          <div class="stat-label">🎯 Zum nächsten Ziel</div>
+          <div class="progress-next">
+            <div class="pn-bar-bg"><div class="pn-bar-fill" id="pnBarFill" style="width:0%"></div></div>
+            <div class="pn-labels"><span id="pnLeft">—</span><span id="pnRight">—</span></div>
+          </div>
+        </div>
+
+        <!-- Tagestyp-Verteilung -->
+        <div class="stat-card full">
+          <div class="stat-label">📅 Tagestypen (alle Tage)</div>
+          <div class="day-type-row" id="dayTypeRow"></div>
+          <div class="dt-legend">
+            <span><span class="dt-dot" style="background:var(--success)"></span>Im Ziel</span>
+            <span><span class="dt-dot" style="background:var(--warn)"></span>Knapp drüber</span>
+            <span><span class="dt-dot" style="background:var(--danger)"></span>Zu viel</span>
+          </div>
+        </div>
+
       </div>
-    </div>
-    <div class="section" style="padding-top:0">
-      <div class="section-title">Empfohlene Zeiten heute</div>
-      <div class="schedule-box" id="scheduleBox"></div>
     </div>
   </div>
 
@@ -634,98 +627,43 @@
 </div>
 
 <script>
-// ── PASSWORD ─────────────────────────────────────────────
-const PW_KEY = 'veloPwHash';
-
-async function sha256(str) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-}
-
-async function checkPassword() {
-  const val = document.getElementById('pwInput').value.trim();
-  if (!val) return;
-  const hash = await sha256(val);
-  const stored = localStorage.getItem(PW_KEY);
-
-  if (!stored) {
-    localStorage.setItem(PW_KEY, hash);
-    unlock();
-  } else if (hash === stored) {
-    unlock();
-  } else {
-    document.getElementById('pwError').textContent = 'Falsches Passwort.';
-    const inp = document.getElementById('pwInput');
-    inp.classList.add('shake');
-    inp.value = '';
-    setTimeout(() => inp.classList.remove('shake'), 400);
-  }
-}
-
-function unlock() {
-  sessionStorage.setItem('veloOk', '1');
-  document.getElementById('gate').style.display = 'none';
-  document.getElementById('app').style.display = 'block';
-  initApp();
-}
-
-document.getElementById('pwInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter') checkPassword();
-});
-
-// Auto-unlock if same session
-if (sessionStorage.getItem('veloOk') === '1' && localStorage.getItem(PW_KEY)) {
-  document.getElementById('gate').style.display = 'none';
-  document.getElementById('app').style.display = 'block';
-}
-
 // ── CONFIG ────────────────────────────────────────────────
-// Fixed: Week 1 = Monday 9 March 2026
-const START_DATE = new Date(2026, 2, 9, 0, 0, 0, 0);
+const START_DATE = new Date(2026, 2, 9, 0, 0, 0, 0); // 9. März 2026
 
+// mg in plan = default mg chip for that week
+// For "2x Après" weeks, default chip is 8 (stored as 8mg = 2x4mg)
 const PLAN = [
-  { w: 1,  p: 8,  mg: 10, phase: 'Struktur',  label: 'Feste Zeiten einführen, Menge leicht runter' },
-  { w: 2,  p: 7,  mg: 10, phase: 'Struktur',  label: 'Timing stabilisieren' },
-  { w: 3,  p: 7,  mg: 6,  phase: 'Stärke ↓',  label: 'Wechsel auf 6 mg Pouches' },
-  { w: 4,  p: 6,  mg: 6,  phase: 'Stärke ↓',  label: 'Körper an 6 mg gewöhnen' },
-  { w: 5,  p: 6,  mg: 6,  phase: 'Menge ↓',   label: 'Erste Reduktion der Anzahl' },
-  { w: 6,  p: 5,  mg: 6,  phase: 'Menge ↓',   label: 'Samstag-Simulation: 3 Pouches' },
-  { w: 7,  p: 5,  mg: 6,  phase: 'Menge ↓',   label: 'Konsistenz aufbauen' },
-  { w: 8,  p: 4,  mg: 6,  phase: 'Menge ↓',   label: 'Lagerniveau anpeilen' },
-  { w: 9,  p: 4,  mg: 6,  phase: 'Lager-fit', label: '2× Woche Lager-Simulation (3/Tag)' },
-  { w: 10, p: 3,  mg: 6,  phase: 'Lager-fit', label: 'Pfingstlager-Ziel erreicht ✓' },
-  { w: 11, p: 3,  mg: 6,  phase: '⛺ Pfingst', label: 'Pfingstlager', event: 'pfingst' },
-  { w: 12, p: 3,  mg: 6,  phase: 'Lager-fit', label: 'Nach Pfingsten: Niveau halten' },
-  { w: 13, p: 3,  mg: 6,  phase: 'Lager-fit', label: 'Weiter stabilisieren' },
-  { w: 14, p: 2,  mg: 6,  phase: 'Sommer ↓',  label: 'Auf Sommerlager-Ziel zubewegen' },
-  { w: 15, p: 2,  mg: 6,  phase: 'Sommer ↓',  label: 'Letzter Sprint vor Lager' },
-  { w: 16, p: 2,  mg: 6,  phase: '🏕 Sommer',  label: 'Sommerlager – Woche 1', event: 'sommer' },
-  { w: 17, p: 2,  mg: 6,  phase: '🏕 Sommer',  label: 'Sommerlager – Woche 2', event: 'sommer' },
+  { w: 1,  p: 8,  mg: 10, phase: 'Anzahl ↓',    label: 'Anzahl leicht senken, Regeln einführen' },
+  { w: 2,  p: 7,  mg: 10, phase: 'Anzahl ↓',    label: 'Weiter runter, Drang beobachten' },
+  { w: 3,  p: 6,  mg: 10, phase: 'Anzahl ↓',    label: 'Aufgabe fertig → dann Pouch' },
+  { w: 4,  p: 6,  mg: 10, phase: 'Stabilisieren', label: 'Niveau halten, Regeln festigen' },
+  { w: 5,  p: 5,  mg: 10, phase: 'Anzahl ↓',    label: 'Nächste Reduktion' },
+  { w: 6,  p: 5,  mg: 10, phase: 'Stabilisieren', label: 'Samstag testen: nur 3 Pouches' },
+  { w: 7,  p: 5,  mg: 8,  phase: 'Stärke ↓',    label: 'Wechsel auf 2× Après (8 mg) – Anzahl stabil' },
+  { w: 8,  p: 5,  mg: 8,  phase: 'Stärke ↓',    label: 'Körper gewöhnt sich, Drang sinkt nach 4–5 Tagen' },
+  { w: 9,  p: 4,  mg: 8,  phase: 'Anzahl ↓',    label: 'Anzahl weiter runter, letzter Push' },
+  { w: 10, p: 3,  mg: 4,  phase: 'Stärke ↓',    label: 'Wechsel auf 1× Après (4 mg) – vor dem Lager fertig' },
+  { w: 11, p: 3,  mg: 4,  phase: '⛺ Pfingst',  label: 'Pfingstlager', event: 'pfingst' },
+  { w: 12, p: 3,  mg: 4,  phase: 'Halten',      label: 'Nach Lager: Niveau halten' },
+  { w: 13, p: 3,  mg: 4,  phase: 'Halten',      label: 'Weiter stabilisieren' },
+  { w: 14, p: 3,  mg: 4,  phase: 'Anzahl ↓',    label: 'Richtung Sommerziel' },
+  { w: 15, p: 2,  mg: 4,  phase: 'Sommer-fit',  label: 'Ziel erreicht – Niveau halten' },
+  { w: 16, p: 2,  mg: 4,  phase: '🏕 Sommer',   label: 'Sommerlager – Woche 1', event: 'sommer' },
+  { w: 17, p: 2,  mg: 4,  phase: '🏕 Sommer',   label: 'Sommerlager – Woche 2', event: 'sommer' },
 ];
 
 const TIPS = {
-  'Struktur':  '<strong>Phase: Struktur.</strong> Noch vor der Mengereduktion – leg feste Uhrzeiten fest. Kein Greifen nach Gefühl. Warte nach dem Drang 5–10 Min: er geht fast immer weg.',
-  'Stärke ↓':  '<strong>Phase: Stärke runter.</strong> 6 mg statt 10 mg – selbe Anzahl. Erste 4–5 Tage spürst du mehr Drang, dann normalisiert es sich. Tipp: 10 mg morgens behalten, 6 mg tagsüber.',
-  'Menge ↓':   '<strong>Phase: Anzahl runter.</strong> Jeden Samstag Lager simulieren: nur 3 Pouches, zu festen Zeiten. Kaugummi (nikotinfrei) hilft gegen den oralen Drang.',
-  'Lager-fit': '<strong>Phase: Lager-fit.</strong> Du bist nah am Lagerziel. Weiter Samstags simulieren. Kaltes Wasser trinken wenn der Drang kommt – funktioniert überraschend gut.',
-  '⛺ Pfingst': '<strong>Pfingstlager.</strong> Du schaffst das. Max. 3 Pouches, zu festen Zeiten (Morgen / Mittag / Abend). Plane sie bewusst ein.',
-  'Sommer ↓':  '<strong>Fast geschafft.</strong> Nur noch 2 Pouches pro Tag – Genuss, nicht Notwendigkeit.',
-  '🏕 Sommer':  '<strong>Sommerlager.</strong> 2 Pouches/Tag. Du hast 4 Monate Arbeit dahinter – du weißt wie\'s geht.',
-  'Langziel':  '<strong>Zielzustand erreicht.</strong> Nikotin als Genussmittel, nicht als Pflicht. 🎉',
-};
-
-const SCHEDULES = {
-  8: ['07:00','09:00','11:00','13:00','15:00','17:00','19:00','21:00'],
-  7: ['07:00','09:30','12:00','14:30','17:00','19:30','21:30'],
-  6: ['07:00','10:00','13:00','16:00','19:00','21:30'],
-  5: ['07:30','11:00','14:00','17:30','21:00'],
-  4: ['08:00','12:00','16:00','21:00'],
-  3: ['08:00','13:00','20:00'],
-  2: ['09:00','20:00'],
+  'Anzahl ↓': `<strong>Regel 1:</strong> Zuerst trinken (Wasser, Kaffee) – 2 Minuten warten ob der Drang bleibt. Meistens geht er von selbst weg.<br><br><strong>Regel 2:</strong> Nie zwei Pouches innerhalb von 90 Minuten.<br><br><strong>Regel 3:</strong> An Arbeitstagen: erst eine Aufgabe abschliessen, dann Pouch – nicht als Einstiegshilfe.`,
+  'Stabilisieren': `<strong>Jetzt festigen.</strong> Du hast das neue Niveau erreicht – jetzt geht es darum, es zur Gewohnheit zu machen.<br><br>Samstag eignet sich gut als Testtag: bewusst nur 3 Pouches, ohne Zeitdruck. Das trainiert den Kopf für die Lagertage.`,
+  'Stärke ↓': `<strong>Stärkewechsel auf 2× Après (8 mg).</strong> Chemisch fast identisch zu deinen 10 mg Velo – der Unterschied ist minimal.<br><br>Die ersten 4–5 Tage kann der Drang etwas stärker sein. Das ist normal und geht weg. Anzahl unbedingt stabil lassen während dieser Phase.`,
+  'Übergang': `<strong>Übergangsphase.</strong> Du wechselst langsam von 2× Après auf 1× Après. Probiere es situationsabhängig: wenn der Drang überschaubar ist, nimm nur eine. Kein Druck – das ist ein Testen, kein striktes Ziel.`,
+  '⛺ Pfingst': `<strong>Pfingstlager – du bist bereit.</strong> 3 Pouches pro Tag, 1× Après jeweils.<br><br>Plane sie bewusst: Morgen, Mittag, Abend. Der Drang zwischen den Pouches ist real aber kurz – er geht nach 5–10 Minuten weg.`,
+  'Halten': `<strong>Niveau halten.</strong> Nach dem Lager ist es wichtig, nicht zurückzufallen. Du weisst jetzt dass 3 Pouches reichen – das Ziel ist es, dieses Wissen auch im Alltag zu behalten.`,
+  'Sommer-fit': `<strong>2 Pouches – Genuss, nicht Pflicht.</strong> Du bist am Ziel für das Sommerlager. Morgen und Abend, bewusst genossen. Nikotin als Ritual, nicht als Reflex.`,
+  '🏕 Sommer': `<strong>Sommerlager.</strong> 2 Pouches/Tag – das schaffst du problemlos. Du hast 4 Monate Arbeit hinter dir. Genieß das Lager.`,
 };
 
 // ── STATE ─────────────────────────────────────────────────
-// data[YYYY-MM-DD] = [ { time: "HH:MM", mg: N }, ... ]
 let data = {};
 let selectedMg = 10;
 
@@ -802,15 +740,16 @@ function deleteEntry(key, idx) {
 function setMg(val) {
   selectedMg = val;
   document.querySelectorAll('.mg-chip').forEach(c => {
-    c.classList.toggle('active', parseInt(c.textContent.trim()) === val);
+    // match by data-mg attribute
+    c.classList.toggle('active', parseInt(c.dataset.mg) === val);
   });
 }
 
 // ── RENDER ────────────────────────────────────────────────
 function render() {
-  const week  = getWeekNum();
-  const plan  = getPlan(week);
-  const k     = todayKey();
+  const week    = getWeekNum();
+  const plan    = getPlan(week);
+  const k       = todayKey();
   const entries = data[k] || [];
   const count   = entries.length;
   const target  = plan.p;
@@ -818,7 +757,7 @@ function render() {
 
   const DAY_NAMES = ['So','Mo','Di','Mi','Do','Fr','Sa'];
 
-  // Header – real day of week from JS Date
+  // Header
   document.getElementById('weekBadge').textContent =
     `Woche ${week} · ${DAY_NAMES[new Date().getDay()]}`;
   document.getElementById('headerTarget').textContent = target;
@@ -826,7 +765,6 @@ function render() {
   // Counter
   const el = document.getElementById('countDisplay');
   el.textContent = count;
-  // green = at or below target, orange = 1 over, red = 2+ over
   const countCls = count >= target + 2 ? ' over' : count === target + 1 ? ' close' : '';
   el.className = 'big-count' + countCls;
 
@@ -845,31 +783,32 @@ function render() {
   if (entries.length === 0) {
     logEl.innerHTML = '<div class="log-empty">Noch keine Pouches heute</div>';
   } else {
-    logEl.innerHTML = entries.map((e, i) => `
-      <div class="log-item">
-        <span class="log-num">${i+1}</span>
-        <span style="flex:1">Pouch</span>
-        <span class="log-mg">${e.mg || plan.mg} mg</span>
-        <button class="log-del" onclick="deleteEntry('${k}', ${i})">✕</button>
-      </div>
-    `).join('');
+    logEl.innerHTML = entries.map((e, i) => {
+      const mgLabel = e.mg === 8 ? '2× 4 mg' : `${e.mg || plan.mg} mg`;
+      return `
+        <div class="log-item">
+          <span class="log-num">${i+1}</span>
+          <span style="flex:1">Pouch</span>
+          <span class="log-mg">${mgLabel}</span>
+          <button class="log-del" onclick="deleteEntry('${k}', ${i})">✕</button>
+        </div>`;
+    }).join('');
   }
 
-  // History grid – last 14 days, oldest on left
+  // History grid
   const grid  = document.getElementById('historyGrid');
   const today = new Date(); today.setHours(0,0,0,0);
   grid.innerHTML = '';
   for (let i = 13; i >= 0; i--) {
-    const d = new Date(today); d.setDate(d.getDate() - i);
-    const dk  = dateKey(d);
-    const w   = getWeekNumFor(d);
-    const dp  = getPlan(w);
+    const d  = new Date(today); d.setDate(d.getDate() - i);
+    const dk = dateKey(d);
+    const w  = getWeekNumFor(d);
+    const dp = getPlan(w);
     const ent = data[dk];
     const val = ent !== undefined ? ent.length : undefined;
-    const isToday = i === 0;
 
     let cls = 'day-dot';
-    if (isToday) cls += ' today';
+    if (i === 0) cls += ' today';
     if (val !== undefined) {
       if (val <= dp.p) cls += ' good';
       else if (val <= dp.p + 2) cls += ' warn';
@@ -880,8 +819,7 @@ function render() {
     dot.className = cls;
     dot.innerHTML = `
       <span class="day-label">${DAY_NAMES[d.getDay()]}</span>
-      <span class="day-count">${val !== undefined ? val : '·'}</span>
-    `;
+      <span class="day-count">${val !== undefined ? val : '·'}</span>`;
     grid.appendChild(dot);
   }
 
@@ -889,49 +827,113 @@ function render() {
   document.getElementById('phaseTip').innerHTML = TIPS[plan.phase] || '';
 
   // Stats
-  document.getElementById('statStreak').textContent = calcStreak();
-  const avg = calcAvg(7);
-  document.getElementById('statAvg').textContent = avg !== null ? avg.toFixed(1) : '—';
+  const streak = calcStreak();
+  document.getElementById('statStreak').textContent = streak;
+  document.getElementById('statBestStreak').textContent = calcBestStreak();
 
-  // Countdowns – fixed dates
-  const pfingst = new Date(2026, 4, 23); // 23. Mai 2026
-  const sommer  = new Date(2026, 5, 27); // 27. Juni 2026
-  const now = new Date();
-  const pDiff = Math.ceil((pfingst - now) / 86400000);
-  const sDiff = Math.ceil((sommer  - now) / 86400000);
+  const pfingst = new Date(2026, 4, 23);
+  const sommer  = new Date(2026, 5, 27);
+  const now2 = new Date();
+  const pDiff = Math.ceil((pfingst - now2) / 86400000);
+  const sDiff = Math.ceil((sommer  - now2) / 86400000);
   document.getElementById('statPfingst').textContent = pDiff > 0 ? pDiff : '⛺';
   document.getElementById('statSommer').textContent  = sDiff > 0 ? sDiff : '🏕';
 
   const mgAvg = calcMgAvg(7);
   document.getElementById('statMg').textContent = mgAvg !== null ? Math.round(mgAvg) : '—';
-  document.getElementById('statDays').textContent = Object.keys(data).filter(k => data[k] && data[k].length > 0).length;
 
-  // Schedule
-  const sched = SCHEDULES[target] || SCHEDULES[3];
-  document.getElementById('scheduleBox').innerHTML =
-    `<div class="schedule-title">Empfohlene Zeiten (${target} Pouches)</div>` +
-    sched.map((t, i) => `<div class="slot"><span class="slot-time">${t}</span><span>Pouch ${i+1}</span></div>`).join('');
+  // Gesparte Pouches vs. 10/Tag Ausgangslage
+  const trackedDays = Object.keys(data).filter(k => data[k] && data[k].length > 0);
+  const totalConsumed = trackedDays.reduce((s, k) => s + data[k].length, 0);
+  const saved = trackedDays.length * 10 - totalConsumed;
+  document.getElementById('statSaved').textContent = saved >= 0 ? '+' + saved : saved;
+
+  // Wochenvergleich
+  const thisWeekAvg = calcAvgForWeek(0);
+  const lastWeekAvg = calcAvgForWeek(1);
+  const maxWC = Math.max(thisWeekAvg || 0, lastWeekAvg || 0, 1);
+  document.getElementById('wcValThis').textContent = thisWeekAvg !== null ? thisWeekAvg.toFixed(1) : '—';
+  document.getElementById('wcValLast').textContent = lastWeekAvg !== null ? lastWeekAvg.toFixed(1) : '—';
+  document.getElementById('wcBarThis').style.width = thisWeekAvg !== null ? (thisWeekAvg / maxWC * 100) + '%' : '0%';
+  document.getElementById('wcBarLast').style.width = lastWeekAvg !== null ? (lastWeekAvg / maxWC * 100) + '%' : '0%';
+  const arrow = document.getElementById('wcArrow');
+  if (thisWeekAvg !== null && lastWeekAvg !== null) {
+    if (thisWeekAvg < lastWeekAvg)      { arrow.textContent = '↓'; arrow.style.color = 'var(--success)'; }
+    else if (thisWeekAvg > lastWeekAvg) { arrow.textContent = '↑'; arrow.style.color = 'var(--danger)'; }
+    else                                 { arrow.textContent = '→'; arrow.style.color = 'var(--muted)'; }
+  }
+
+  // Fortschritt zum nächsten Ziel
+  const currentTarget = plan.p;
+  const nextPlan = PLAN.find(r => r.w > week && r.p < currentTarget);
+  if (nextPlan) {
+    const startTarget = getPlan(week - 1).p;
+    const totalDrop = startTarget - nextPlan.p;
+    const doneDrop  = startTarget - currentTarget;
+    const pct = totalDrop > 0 ? Math.round(doneDrop / totalDrop * 100) : 100;
+    document.getElementById('pnBarFill').style.width = pct + '%';
+    document.getElementById('pnLeft').textContent = currentTarget + ' Pouches/Tag';
+    document.getElementById('pnRight').textContent = 'Ziel: ' + nextPlan.p + ' (Wo ' + nextPlan.w + ')';
+  } else {
+    document.getElementById('pnBarFill').style.width = '100%';
+    document.getElementById('pnLeft').textContent = 'Endziel erreicht ✓';
+    document.getElementById('pnRight').textContent = '';
+  }
+
+  // Tagestyp-Verteilung
+  const allKeys = Object.keys(data).filter(k => data[k] !== undefined).sort();
+  let goodDays = 0, warnDays = 0, badDays = 0;
+  allKeys.forEach(k => {
+    const d2 = new Date(k); const w2 = getWeekNumFor(d2); const p2 = getPlan(w2);
+    const v = data[k].length;
+    if (v <= p2.p) goodDays++;
+    else if (v <= p2.p + 2) warnDays++;
+    else badDays++;
+  });
+  const totalTypeDays = goodDays + warnDays + badDays || 1;
+  const dtRow = document.getElementById('dayTypeRow');
+  const maxH = 32;
+  dtRow.innerHTML = '';
+  // Show one bar per tracked day, colored by type - simplified as 3 aggregate bars
+  [[goodDays,'var(--success)'],[warnDays,'var(--warn)'],[badDays,'var(--danger)']].forEach(([count, color]) => {
+    const h = Math.max(count / totalTypeDays * maxH, count > 0 ? 3 : 0);
+    const bar = document.createElement('div');
+    bar.className = 'dt-bar';
+    bar.style.height = h + "px"; bar.style.background = color; bar.style.flex = Math.max(count, 0.5);
+    dtRow.appendChild(bar);
+  });
+  // Add count labels below
+  const labels = document.createElement('div');
+  labels.style.cssText = 'display:flex;gap:3px;margin-top:4px;font-size:10px;color:var(--muted)';
+  [[goodDays,'var(--success)'],[warnDays,'var(--warn)'],[badDays,'var(--danger)']].forEach(([count, color]) => {
+    const l = document.createElement('div');
+    l.style.flex = Math.max(count, 0.5); l.style.textAlign = "center"; l.style.color = color;
+    l.textContent = count;
+    labels.appendChild(l);
+  });
+  dtRow.parentNode.insertBefore(labels, dtRow.nextSibling);
 
   // Plan table
   document.getElementById('planTable').innerHTML = PLAN.map(row => {
     const cur = row.w === week;
     let cls = 'plan-row';
-    if (cur)              cls += ' current';
+    if (cur)                     cls += ' current';
     if (row.event === 'pfingst') cls += ' pfingst';
     if (row.event === 'sommer')  cls += ' sommer';
 
     let tag = '';
     if (row.event === 'pfingst') tag = `<span class="event-tag tag-pfingst">Pfingst</span>`;
     if (row.event === 'sommer')  tag = `<span class="event-tag tag-sommer">Sommer</span>`;
-    if (row.event === 'ziel')    tag = `<span class="event-tag tag-ziel">Ziel ✓</span>`;
+
+    const mgLabel = row.mg === 8 ? '2× 4 mg' : `${row.mg} mg`;
 
     return `
       <div class="${cls}">
         <div class="plan-week">Wo ${row.w}</div>
         <div class="plan-desc">${row.label}${tag ? '<br>'+tag : ''}</div>
-        <div style="text-align:right;min-width:44px;flex-shrink:0">
+        <div style="text-align:right;min-width:52px;flex-shrink:0">
           <div class="plan-target" style="color:${cur ? 'var(--accent)' : 'var(--text)'}">${row.p}</div>
-          <div class="plan-mg">${row.mg} mg</div>
+          <div class="plan-mg">${mgLabel}</div>
         </div>
       </div>`;
   }).join('');
@@ -941,9 +943,9 @@ function calcStreak() {
   let streak = 0;
   const d = new Date(); d.setHours(0,0,0,0);
   while (true) {
-    const k = dateKey(d);
-    const w = getWeekNumFor(d);
-    const p = getPlan(w);
+    const k   = dateKey(d);
+    const w   = getWeekNumFor(d);
+    const p   = getPlan(w);
     const ent = data[k];
     if (ent === undefined) break;
     if (ent.length > p.p) break;
@@ -968,7 +970,7 @@ function calcMgAvg(days) {
   const vals = [];
   const d = new Date(); d.setHours(0,0,0,0);
   for (let i = 0; i < days; i++) {
-    const k = dateKey(d);
+    const k   = dateKey(d);
     const ent = data[k];
     if (ent && ent.length > 0) {
       const w = getWeekNumFor(d);
@@ -976,6 +978,33 @@ function calcMgAvg(days) {
       vals.push(ent.reduce((s, e) => s + (e.mg || p.mg), 0));
     }
     d.setDate(d.getDate() - 1);
+  }
+  return vals.length ? vals.reduce((a,b) => a+b, 0) / vals.length : null;
+}
+
+function calcBestStreak() {
+  const allKeys = Object.keys(data).sort();
+  let best = 0, cur = 0;
+  allKeys.forEach(k => {
+    const w = getWeekNumFor(new Date(k));
+    const p = getPlan(w);
+    if (data[k].length <= p.p) { cur++; best = Math.max(best, cur); }
+    else cur = 0;
+  });
+  return best;
+}
+
+function calcAvgForWeek(weeksAgo) {
+  // Returns avg pouches/day for a given week offset (0 = this week, 1 = last week)
+  const today = new Date(); today.setHours(0,0,0,0);
+  const dayOfWeek = (today.getDay() + 6) % 7; // 0=Mon
+  const weekStart = new Date(today); weekStart.setDate(today.getDate() - dayOfWeek - weeksAgo * 7);
+  const vals = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart); d.setDate(weekStart.getDate() + i);
+    if (d > today) break;
+    const k = dateKey(d);
+    if (data[k] !== undefined) vals.push(data[k].length);
   }
   return vals.length ? vals.reduce((a,b) => a+b, 0) / vals.length : null;
 }
@@ -996,16 +1025,18 @@ function switchTab(page, btn) {
 
 function initApp() {
   loadData();
+  // Set data-mg on chips for reliable matching
+  const chipVals = [4, 8, 10, 40];
+  document.querySelectorAll('.mg-chip').forEach((c, i) => {
+    c.dataset.mg = chipVals[i];
+  });
+  // Default chip = plan's mg for current week (never 40)
   const plan = getPlan(getWeekNum());
-  // Default: plan.mg (6 or 10 depending on week). 40mg is never default.
   setMg(plan.mg);
   render();
 }
 
-// Auto-init if already unlocked
-if (document.getElementById('app').style.display !== 'none') {
-  initApp();
-}
+initApp();
 </script>
 </body>
 </html>
