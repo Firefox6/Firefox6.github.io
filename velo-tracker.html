@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Pouchinator</title>
+<title>Kaltschnauze</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap');
 
@@ -463,7 +463,7 @@
   <div class="header">
     <div class="header-top">
       <div>
-        <h1>POUCH<span>INATOR</span></h1>
+        <h1>KALT<span>SCHNAUZE</span></h1>
         <div class="week-badge" id="weekBadge">—</div>
       </div>
       <div class="header-right">
@@ -635,14 +635,14 @@ const START_DATE = new Date(2026, 2, 9, 0, 0, 0, 0); // 9. März 2026
 const PLAN = [
   { w: 1,  p: 8,  mg: 10, phase: 'Anzahl ↓',    label: 'Anzahl leicht senken, Regeln einführen' },
   { w: 2,  p: 7,  mg: 10, phase: 'Anzahl ↓',    label: 'Weiter runter, Drang beobachten' },
-  { w: 3,  p: 6,  mg: 10, phase: 'Anzahl ↓',    label: 'Aufgabe fertig → dann Pouch' },
-  { w: 4,  p: 6,  mg: 10, phase: 'Stabilisieren', label: 'Niveau halten, Regeln festigen' },
-  { w: 5,  p: 5,  mg: 10, phase: 'Anzahl ↓',    label: 'Nächste Reduktion' },
-  { w: 6,  p: 5,  mg: 10, phase: 'Stabilisieren', label: 'Samstag testen: nur 3 Pouches' },
-  { w: 7,  p: 5,  mg: 8,  phase: 'Stärke ↓',    label: 'Wechsel auf 2× Après (8 mg) – Anzahl stabil' },
-  { w: 8,  p: 5,  mg: 8,  phase: 'Stärke ↓',    label: 'Körper gewöhnt sich, Drang sinkt nach 4–5 Tagen' },
-  { w: 9,  p: 4,  mg: 8,  phase: 'Anzahl ↓',    label: 'Anzahl weiter runter, letzter Push' },
-  { w: 10, p: 3,  mg: 4,  phase: 'Stärke ↓',    label: 'Wechsel auf 1× Après (4 mg) – vor dem Lager fertig' },
+  { w: 3,  p: 5,  mg: 8,  phase: 'Stärke ↓',    label: 'Wechsel auf 2× Après – 26 restliche 10mg aufbrauchen' },
+  { w: 4,  p: 5,  mg: 8,  phase: 'Stabilisieren', label: 'Niveau halten, Körper gewöhnt sich' },
+  { w: 5,  p: 4,  mg: 8,  phase: 'Anzahl ↓',    label: 'Anzahl runter, Stärke stabil' },
+  { w: 6,  p: 4,  mg: 4,  phase: 'Stärke ↓',    label: 'Wechsel auf 1× Après (4 mg) – Anzahl stabil lassen' },
+  { w: 7,  p: 4,  mg: 4,  phase: 'Stabilisieren', label: 'Körper an 4 mg gewöhnen' },
+  { w: 8,  p: 3,  mg: 4,  phase: 'Anzahl ↓',    label: 'Letzter Push vor Pfingsten' },
+  { w: 9,  p: 3,  mg: 4,  phase: 'Halten',      label: 'Pfingstlager-Ziel erreicht ✓' },
+  { w: 10, p: 3,  mg: 4,  phase: 'Halten',      label: 'Niveau halten' },
   { w: 11, p: 3,  mg: 4,  phase: '⛺ Pfingst',  label: 'Pfingstlager', event: 'pfingst' },
   { w: 12, p: 3,  mg: 4,  phase: 'Halten',      label: 'Nach Lager: Niveau halten' },
   { w: 13, p: 3,  mg: 4,  phase: 'Halten',      label: 'Weiter stabilisieren' },
@@ -655,7 +655,7 @@ const PLAN = [
 const TIPS = {
   'Anzahl ↓': `<strong>Regel 1:</strong> Zuerst trinken (Wasser, Kaffee) – 2 Minuten warten ob der Drang bleibt. Meistens geht er von selbst weg.<br><br><strong>Regel 2:</strong> Nie zwei Pouches innerhalb von 90 Minuten.<br><br><strong>Regel 3:</strong> An Arbeitstagen: erst eine Aufgabe abschliessen, dann Pouch – nicht als Einstiegshilfe.`,
   'Stabilisieren': `<strong>Jetzt festigen.</strong> Du hast das neue Niveau erreicht – jetzt geht es darum, es zur Gewohnheit zu machen.<br><br>Samstag eignet sich gut als Testtag: bewusst nur 3 Pouches, ohne Zeitdruck. Das trainiert den Kopf für die Lagertage.`,
-  'Stärke ↓': `<strong>Stärkewechsel auf 2× Après (8 mg).</strong> Chemisch fast identisch zu deinen 10 mg Velo – der Unterschied ist minimal.<br><br>Die ersten 4–5 Tage kann der Drang etwas stärker sein. Das ist normal und geht weg. Anzahl unbedingt stabil lassen während dieser Phase.`,
+  'Stärke ↓': `<strong>Stärkewechsel.</strong> Diese Woche wechselst du die Stärke – Anzahl unbedingt stabil halten. Die ersten 4–5 Tage kann der Drang etwas stärker sein, das ist normal und geht weg.<br><br>Wenn noch 10mg Velo übrig sind: einfach mischen bis sie aufgebraucht sind, dann voll auf Après.`,
   'Übergang': `<strong>Übergangsphase.</strong> Du wechselst langsam von 2× Après auf 1× Après. Probiere es situationsabhängig: wenn der Drang überschaubar ist, nimm nur eine. Kein Druck – das ist ein Testen, kein striktes Ziel.`,
   '⛺ Pfingst': `<strong>Pfingstlager – du bist bereit.</strong> 3 Pouches pro Tag, 1× Après jeweils.<br><br>Plane sie bewusst: Morgen, Mittag, Abend. Der Drang zwischen den Pouches ist real aber kurz – er geht nach 5–10 Minuten weg.`,
   'Halten': `<strong>Niveau halten.</strong> Nach dem Lager ist es wichtig, nicht zurückzufallen. Du weisst jetzt dass 3 Pouches reichen – das Ziel ist es, dieses Wissen auch im Alltag zu behalten.`,
