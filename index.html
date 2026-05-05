@@ -1,0 +1,1112 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#101827" />
+<meta name="mobile-web-app-capable" content="yes" />
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<title>Pouchinator</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #070b18;
+    --card: rgba(255,255,255,0.065);
+    --card-border: rgba(255,255,255,0.12);
+    --purple: #c084fc;
+    --purple-dim: rgba(192,132,252,0.22);
+    --cyan: #22d3ee;
+    --cyan-dim: rgba(34,211,238,0.18);
+    --lime: #bef264;
+    --rose: #fb7185;
+    --amber: #fbbf24;
+    --text: #f8fafc;
+    --text-muted: #64748b;
+    --text-sub: #a8b3c7;
+    --grad: linear-gradient(135deg,#fb7185 0%,#fbbf24 38%,#22d3ee 100%);
+    --grad-cool: linear-gradient(135deg,#8b5cf6 0%,#22d3ee 100%);
+    --font: 'Bricolage Grotesque', system-ui, sans-serif;
+    --mono: 'DM Mono', monospace;
+  }
+
+  html, body {
+    height: 100%;
+    background:
+      radial-gradient(circle at 16% -8%, rgba(251,113,133,.28), transparent 34%),
+      radial-gradient(circle at 100% 8%, rgba(34,211,238,.22), transparent 32%),
+      radial-gradient(circle at 55% 112%, rgba(192,132,252,.22), transparent 36%),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+  }
+
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    max-width: 430px;
+    margin: 0 auto;
+    padding-top: env(safe-area-inset-top, 0px);
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+  #app::before {
+    content: "";
+    position: absolute;
+    inset: -80px -90px auto -90px;
+    height: 260px;
+    background: conic-gradient(from 215deg, rgba(251,113,133,.26), rgba(251,191,36,.18), rgba(34,211,238,.25), rgba(139,92,246,.22), rgba(251,113,133,.26));
+    filter: blur(34px);
+    opacity: .85;
+    z-index: -1;
+    transform: rotate(-8deg);
+  }
+
+  /* ── scroll container ── */
+  #content {
+    flex: 1;
+    position: relative;
+    z-index: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+  }
+  #content::-webkit-scrollbar { display: none; }
+
+  /* ── tab panes ── */
+  .tab-pane { display: none; padding: 16px 16px 24px; animation: fadeUp 0.22s ease; }
+  .tab-pane.active { display: block; }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── bottom nav ── */
+  #nav {
+    flex-shrink: 0;
+    display: flex;
+    gap: 6px;
+    margin: 0 12px 10px;
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+    background: rgba(7,11,24,0.74);
+    backdrop-filter: blur(22px) saturate(1.25);
+    -webkit-backdrop-filter: blur(22px) saturate(1.25);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 24px;
+    box-shadow: 0 16px 42px rgba(0,0,0,.32);
+  }
+  .nav-btn {
+    flex: 1;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 10px 0 8px;
+    color: #4b5563;
+    font-family: var(--font);
+    font-size: 11px;
+    font-weight: 600;
+    transition: color .15s;
+    position: relative;
+  }
+  .nav-btn .nav-icon { font-size: 20px; line-height: 1; }
+  .nav-btn { border-radius: 18px; }
+  .nav-btn.active { color: #fff; background: rgba(255,255,255,.08); }
+  .nav-btn .nav-dot {
+    width: 16px; height: 2px;
+    border-radius: 2px;
+    background: var(--grad);
+    opacity: 0;
+    transition: opacity .2s;
+    margin-top: 2px;
+  }
+  .nav-btn.active .nav-dot { opacity: 1; }
+
+  /* ── shared cards ── */
+  .card {
+    border-radius: 22px;
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 18px 45px rgba(0,0,0,.16);
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .label-xs {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    display: block;
+  }
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 99px;
+    font-size: 11px;
+    font-weight: 700;
+    background: linear-gradient(135deg,rgba(167,139,250,.25),rgba(56,189,248,.25));
+    color: #c4b5fd;
+    border: 1px solid rgba(167,139,250,.3);
+  }
+
+  /* ── hero card ── */
+  #hero-card {
+    border-radius: 30px;
+    padding: 22px;
+    margin-bottom: 12px;
+    position: relative;
+    overflow: hidden;
+    background:
+      linear-gradient(135deg, rgba(255,255,255,.16), rgba(255,255,255,.045)),
+      radial-gradient(circle at 12% 15%, rgba(251,113,133,.55), transparent 34%),
+      radial-gradient(circle at 88% 22%, rgba(251,191,36,.38), transparent 30%),
+      radial-gradient(circle at 72% 95%, rgba(34,211,238,.42), transparent 34%),
+      #141827;
+    border: 1px solid rgba(255,255,255,.14);
+    box-shadow: 0 24px 70px rgba(0,0,0,.36), inset 0 1px 0 rgba(255,255,255,.12);
+  }
+  #hero-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: linear-gradient(rgba(255,255,255,.07) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.06) 1px, transparent 1px);
+    background-size: 26px 26px;
+    mask-image: linear-gradient(to bottom, rgba(0,0,0,.48), transparent 82%);
+    pointer-events: none;
+  }
+  #hero-card .deco1, #hero-card .deco2 {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  #hero-card .deco1 { width: 128px; height: 128px; top: -32px; right: -32px; background: radial-gradient(circle,#e879f9,transparent); opacity: .2; }
+  #hero-card .deco2 { width: 96px;  height: 96px; bottom: -24px; left: -24px; background: radial-gradient(circle,#38bdf8,transparent); opacity: .15; }
+  .hero-label { font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: rgba(233,213,255,.7); margin-bottom: 12px; }
+  .hero-big { font-size: 52px; font-weight: 800; line-height: 1; color: #fff; }
+  .hero-sub { font-size: 13px; color: rgba(233,213,255,.7); margin-top: 4px; }
+  .hero-cyan { font-size: 34px; font-weight: 700; color: #67e8f9; line-height: 1; }
+  .hero-cyan small { font-size: 16px; font-weight: 400; color: #a5f3fc; margin-left: 3px; }
+  .hero-nums { display: flex; gap: 24px; align-items: flex-end; margin-bottom: 16px; }
+  /* sparkline bars */
+  #spark { display: flex; align-items: flex-end; gap: 3px; height: 32px; }
+  .spark-bar { flex: 1; border-radius: 3px 3px 0 0; transition: height .4s ease; }
+
+  /* ── stats row ── */
+  .stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  .stat-card {
+    border-radius: 18px;
+    padding: 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .stat-icon { font-size: 22px; }
+  .stat-val { font-size: 22px; font-weight: 800; color: #fff; line-height: 1; }
+  .stat-lbl { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+  /* ── last entry ── */
+  #last-entry {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 18px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+  }
+  .last-icon { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; background: rgba(167,139,250,.2); flex-shrink: 0; }
+
+  /* ── quick add ── */
+  #quick-add { background: rgba(255,255,255,.065); border: 1px solid rgba(255,255,255,.12); border-radius: 24px; padding: 14px; margin-bottom: 12px; box-shadow: inset 0 1px 0 rgba(255,255,255,.07); }
+  .preset-row { display: flex; gap: 6px; }
+  .preset-btn {
+    flex: 1;
+    padding: 13px 0;
+    border-radius: 16px;
+    border: 1px solid rgba(255,255,255,.14);
+    background: linear-gradient(135deg,rgba(251,113,133,.22),rgba(251,191,36,.14),rgba(34,211,238,.18));
+    color: #fff;
+    font-family: var(--font);
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+    transition: transform .1s, background .25s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .preset-btn:active { transform: scale(.9); background: linear-gradient(135deg,#7c3aed,#0284c7); }
+  .custom-link { width: 100%; background: none; border: none; color: #a78bfa; font-family: var(--font); font-size: 13px; cursor: pointer; padding: 8px 0 2px; text-align: center; transition: color .15s; }
+  .custom-link:hover { color: #c4b5fd; }
+
+  /* ── modal ── */
+  #modal-overlay {
+    display: none;
+    position: fixed; inset: 0; z-index: 100;
+    background: rgba(15,10,30,.6);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    align-items: flex-end;
+    justify-content: center;
+  }
+  #modal-overlay.open { display: flex; }
+  .modal-sheet {
+    width: 100%; max-width: 430px;
+    border-radius: 24px 24px 0 0;
+    padding: 20px 20px 36px;
+    max-height: 90dvh;
+    overflow-y: auto;
+    background: linear-gradient(160deg,#1e1333 0%,#0f172a 100%);
+    border: 1px solid rgba(167,139,250,.2);
+    border-bottom: none;
+    animation: slideUp .25s cubic-bezier(.22,.68,0,1.2);
+  }
+  @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  .modal-handle { width: 40px; height: 4px; border-radius: 4px; background: #374151; margin: 0 auto 18px; }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .modal-title { font-size: 17px; font-weight: 700; color: #fff; }
+  .modal-close { background: none; border: none; color: #6b7280; font-size: 24px; line-height: 1; cursor: pointer; padding: 0 4px; }
+  .form-group { margin-bottom: 14px; }
+  .form-label { display: block; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #9ca3af; margin-bottom: 6px; }
+  .form-input {
+    width: 100%; padding: 12px 14px; border-radius: 14px;
+    background: rgba(255,255,255,.07);
+    border: 1px solid rgba(167,139,250,.2);
+    color: #fff;
+    font-family: var(--font);
+    font-size: 14px;
+    outline: none;
+    transition: border-color .15s, box-shadow .15s;
+    -webkit-appearance: none;
+  }
+  .form-input:focus { border-color: var(--purple); box-shadow: 0 0 0 3px rgba(167,139,250,.15); }
+  .form-input::-webkit-calendar-picker-indicator { filter: invert(.6); }
+
+  .grad-btn {
+    width: 100%; padding: 14px;
+    border-radius: 14px; border: none;
+    background: var(--grad);
+    box-shadow: 0 4px 20px rgba(167,139,250,.4);
+    color: #fff;
+    font-family: var(--font);
+    font-weight: 700;
+    font-size: 15px;
+    cursor: pointer;
+    transition: transform .1s, box-shadow .15s;
+    margin-top: 6px;
+  }
+  .grad-btn:active { transform: scale(.97); box-shadow: 0 2px 10px rgba(167,139,250,.3); }
+
+  /* ── stats tab ── */
+  .avg-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  .avg-card { border-radius: 24px; padding: 16px; box-shadow: inset 0 1px 0 rgba(255,255,255,.08); }
+  .avg-icon { font-size: 22px; }
+  .avg-val { font-size: 26px; font-weight: 800; color: #fff; margin-top: 8px; line-height: 1; }
+  .avg-lbl { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+  .camp-card {
+    border-radius: 18px;
+    padding: 16px;
+    margin-bottom: 12px;
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(135deg,#312e81 0%,#0c4a6e 100%);
+    border: 1px solid rgba(167,139,250,.25);
+  }
+  .camp-card .deco { position: absolute; width: 80px; height: 80px; border-radius: 50%; top: -16px; right: -16px; background: radial-gradient(circle,#a78bfa,transparent); opacity: .2; pointer-events: none; }
+  .camp-lbl { font-size: 13px; font-weight: 600; color: rgba(221,214,254,.85); margin-bottom: 8px; }
+  .camp-nums { display: flex; gap: 20px; }
+  .camp-num { font-size: 42px; font-weight: 800; color: #fff; line-height: 1; }
+  .camp-unit { font-size: 11px; color: #93c5fd; margin-top: 4px; }
+
+  .chart-card { border-radius: 24px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.11); padding: 14px; margin-bottom: 12px; box-shadow: inset 0 1px 0 rgba(255,255,255,.07); }
+  .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .chart-title { font-size: 13px; font-weight: 600; color: #d1d5db; }
+  .chart-wrap { position: relative; height: 168px; }
+  canvas { border-radius: 8px; }
+
+  .range-toggle { display: flex; gap: 3px; background: rgba(255,255,255,.06); border-radius: 12px; padding: 3px; }
+  .range-btn {
+    padding: 4px 10px;
+    border-radius: 9px;
+    border: none;
+    background: transparent;
+    color: #6b7280;
+    font-family: var(--font);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .range-btn.active { background: var(--grad); color: #101827; box-shadow: 0 4px 14px rgba(251,191,36,.22); }
+
+  /* ── log tab ── */
+  .log-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-top: 4px; }
+  .log-title { font-size: 20px; font-weight: 800; }
+  .add-fab {
+    width: 38px; height: 38px; border-radius: 15px;
+    background: var(--grad);
+    box-shadow: 0 8px 24px rgba(251,113,133,.22);
+    border: none; color: #101827;
+    font-size: 22px; line-height: 1;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: transform .1s;
+  }
+  .add-fab:active { transform: scale(.88); }
+  .log-actions-top { display: flex; gap: 8px; align-items: center; }
+  .mini-fab {
+    min-width: 38px; height: 38px; border-radius: 15px;
+    background: rgba(255,255,255,.075);
+    border: 1px solid rgba(255,255,255,.13);
+    color: #e2e8f0;
+    font-family: var(--font);
+    font-size: 15px;
+    font-weight: 800;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform .1s, border-color .15s, background .15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mini-fab:active { transform: scale(.9); }
+  .mini-fab:hover { border-color: rgba(167,139,250,.5); background: rgba(167,139,250,.12); }
+  .install-fab { display: none; }
+  .install-fab.visible { display: flex; }
+  #import-file { display: none; }
+  #toast {
+    position: fixed;
+    left: 50%; bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%) translateY(16px);
+    z-index: 200;
+    max-width: 360px;
+    width: calc(100% - 32px);
+    padding: 12px 14px;
+    border-radius: 16px;
+    background: rgba(30,19,51,.96);
+    border: 1px solid rgba(167,139,250,.25);
+    box-shadow: 0 8px 30px rgba(0,0,0,.35);
+    color: #fff;
+    font-size: 13px;
+    text-align: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .18s, transform .18s;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .day-group { margin-bottom: 20px; }
+  .day-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .day-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); }
+
+  .log-list { border-radius: 22px; overflow: hidden; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
+  .log-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
+  .log-row + .log-row { border-top: 1px solid rgba(255,255,255,.05); }
+  .log-time { font-family: var(--mono); font-size: 13px; color: var(--text-muted); width: 44px; flex-shrink: 0; }
+  .log-actions { display: flex; gap: 10px; margin-left: auto; }
+  .log-btn { background: none; border: none; cursor: pointer; font-size: 15px; color: #4b5563; transition: color .15s; padding: 2px; }
+  .log-btn:hover { color: #a78bfa; }
+  .log-btn.del:hover { color: #f87171; }
+  .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 0 20px; gap: 12px; opacity: .35; }
+  .empty-state .empty-icon { font-size: 48px; }
+  .empty-state p { color: #9ca3af; font-size: 14px; }
+
+  /* greeting */
+  .greeting-sub { font-size: 13px; color: var(--text-muted); }
+  .greeting-name { font-size: 26px; font-weight: 800; margin-top: 2px; }
+
+  /* page title */
+  .page-title { font-size: 20px; font-weight: 800; padding-top: 4px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- ── Content ── -->
+  <div id="content">
+
+    <!-- HOME -->
+    <div id="tab-home" class="tab-pane active">
+      <p class="greeting-sub" id="greeting">Guten Tag 👋</p>
+      <p class="greeting-name">Julien</p>
+      <p class="greeting-sub" style="margin-top:3px;">Tracking ohne Spreadsheet-Vibes.</p>
+
+      <!-- Hero -->
+      <div id="hero-card" style="margin-top:12px;">
+        <div class="deco1"></div>
+        <div class="deco2"></div>
+        <div style="position:relative;z-index:1;">
+          <p class="hero-label" id="hero-label">Heute · Mittwoch</p>
+          <div class="hero-nums">
+            <div>
+              <div class="hero-big" id="today-pouches">0</div>
+              <div class="hero-sub">Pouches</div>
+            </div>
+            <div style="padding-bottom:4px;">
+              <div class="hero-cyan" id="today-mg">0<small>mg</small></div>
+              <div class="hero-sub">Nikotin</div>
+            </div>
+          </div>
+          <div id="spark"></div>
+          <p style="font-size:10px;color:rgba(199,184,255,.6);margin-top:6px;">Letzte 7 Tage</p>
+        </div>
+      </div>
+
+      <!-- Stats row -->
+      <div class="stats-row">
+        <div class="stat-card" style="background:linear-gradient(135deg,rgba(251,113,133,.13),rgba(251,191,36,.08));border:1px solid rgba(255,255,255,.11);">
+          <span class="stat-icon">🔥</span>
+          <div>
+            <div class="stat-val" id="streak-val">0</div>
+            <div class="stat-lbl">Tage in Folge</div>
+          </div>
+        </div>
+        <div class="stat-card" style="background:linear-gradient(135deg,rgba(34,211,238,.12),rgba(139,92,246,.09));border:1px solid rgba(255,255,255,.11);">
+          <span class="stat-icon">📦</span>
+          <div>
+            <div class="stat-val" id="total-pouches">0</div>
+            <div class="stat-lbl">Pouches total</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Last entry -->
+      <div id="last-entry" style="display:none;">
+        <div class="last-icon">🕐</div>
+        <div style="flex:1;">
+          <div style="font-size:11px;color:var(--text-muted);">Letzter Eintrag</div>
+          <div style="font-size:14px;font-weight:600;" id="last-time">–</div>
+        </div>
+        <span class="badge" id="last-mg">–</span>
+      </div>
+
+      <!-- Quick Add -->
+      <div id="quick-add">
+        <span class="label-xs">Quick Add</span>
+        <div class="preset-row" id="preset-row"></div>
+        <p style="font-size:10px;color:#4b5563;text-align:center;margin-top:6px;">mg pro Pouch</p>
+        <button class="custom-link" onclick="openModal('add')">+ Andere Menge / andere Zeit</button>
+      </div>
+    </div>
+
+    <!-- STATS -->
+    <div id="tab-stats" class="tab-pane">
+      <p class="page-title">Statistiken</p>
+
+      <div class="avg-row">
+        <div class="avg-card" style="background:linear-gradient(135deg,rgba(251,113,133,.14),rgba(251,191,36,.08));border:1px solid rgba(255,255,255,.11);">
+          <div class="avg-icon">💊</div>
+          <div class="avg-val" id="avg-pouches">–</div>
+          <div class="avg-lbl">Ø Pouches/Tag</div>
+        </div>
+        <div class="avg-card" style="background:linear-gradient(135deg,rgba(34,211,238,.13),rgba(139,92,246,.09));border:1px solid rgba(255,255,255,.11);">
+          <div class="avg-icon">⚡</div>
+          <div class="avg-val" id="avg-mg">–</div>
+          <div class="avg-lbl">Ø mg/Tag</div>
+        </div>
+      </div>
+
+      <!-- Countdowns -->
+      <div id="countdowns"></div>
+
+      <!-- Chart mg -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <span class="chart-title">mg / Tag</span>
+          <div class="range-toggle" id="range-mg">
+            <button class="range-btn active" data-range="week" onclick="setRange('mg','week',this)">Wo</button>
+            <button class="range-btn" data-range="month" onclick="setRange('mg','month',this)">Mo</button>
+            <button class="range-btn" data-range="year" onclick="setRange('mg','year',this)">Jahr</button>
+          </div>
+        </div>
+        <div class="chart-wrap"><canvas id="chart-mg"></canvas></div>
+      </div>
+
+      <!-- Chart pouches -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <span class="chart-title">Pouches / Tag</span>
+          <div class="range-toggle" id="range-p">
+            <button class="range-btn active" data-range="week" onclick="setRange('p','week',this)">Wo</button>
+            <button class="range-btn" data-range="month" onclick="setRange('p','month',this)">Mo</button>
+            <button class="range-btn" data-range="year" onclick="setRange('p','year',this)">Jahr</button>
+          </div>
+        </div>
+        <div class="chart-wrap"><canvas id="chart-p"></canvas></div>
+      </div>
+    </div>
+
+    <!-- LOG -->
+    <div id="tab-log" class="tab-pane">
+      <div class="log-header">
+        <p class="log-title">Log</p>
+        <div class="log-actions-top">
+          <button class="mini-fab install-fab" id="install-app-btn" onclick="installApp()" title="Als App installieren" aria-label="Als App installieren">📲</button>
+          <button class="mini-fab" onclick="exportEntries()" title="Exportieren" aria-label="Exportieren">⬇</button>
+          <button class="mini-fab" onclick="document.getElementById('import-file').click()" title="Importieren" aria-label="Importieren">⬆</button>
+          <input id="import-file" type="file" accept="application/json,.json" onchange="importEntries(event)" />
+          <button class="add-fab" onclick="openModal('add')">+</button>
+        </div>
+      </div>
+      <div id="log-list"></div>
+    </div>
+
+  </div><!-- /content -->
+
+  <!-- ── Bottom nav ── -->
+  <nav id="nav">
+    <button class="nav-btn active" data-tab="home" onclick="switchTab('home',this)">
+      <span class="nav-icon">🏠</span>
+      <span>Home</span>
+      <span class="nav-dot"></span>
+    </button>
+    <button class="nav-btn" data-tab="stats" onclick="switchTab('stats',this)">
+      <span class="nav-icon">📊</span>
+      <span>Stats</span>
+      <span class="nav-dot"></span>
+    </button>
+    <button class="nav-btn" data-tab="log" onclick="switchTab('log',this)">
+      <span class="nav-icon">📋</span>
+      <span>Log</span>
+      <span class="nav-dot"></span>
+    </button>
+  </nav>
+</div>
+
+<!-- ── Modal ── -->
+<div id="modal-overlay" onclick="handleOverlayClick(event)">
+  <div class="modal-sheet" onclick="event.stopPropagation()">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">Eintrag hinzufügen</span>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ─────────── CONSTANTS ─────────── */
+const STORAGE_KEY = "pouchinator-entries";
+const PRESETS = [4, 6, 8, 10, 40];
+const CAMPS = [
+  { label: "Pfingstlager", icon: "🏕️", date: new Date("2026-05-23T08:00:00") },
+  { label: "Sommerlager",  icon: "⛺",  date: new Date("2026-06-27T07:00:00") },
+];
+let deferredInstallPrompt = null;
+
+/* ─────────── HELPERS ─────────── */
+const pad = n => String(n).padStart(2,"0");
+const dateKey = ts => { const d=new Date(ts); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+const formatTime = ts => { const d=new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const formatDate = ts => new Date(ts).toLocaleDateString("de-CH",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+function toLocalDTValue(d) {
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function getCountdown(target) {
+  const diff = target - Date.now();
+  if (diff <= 0) return { days:0, hours:0, done:true };
+  return { days: Math.floor(diff/86400000), hours: Math.floor((diff%86400000)/3600000), done:false };
+}
+function createGradient(ctx, c1, c2) {
+  const g = ctx.createLinearGradient(0,0,0,130);
+  g.addColorStop(0, c1); g.addColorStop(1, c2); return g;
+}
+function hexToRgba(hex, alpha) {
+  const clean = hex.replace('#','');
+  const n = parseInt(clean.length === 3 ? clean.split('').map(x=>x+x).join('') : clean, 16);
+  return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${alpha})`;
+}
+function showToast(message) {
+  const toast = document.getElementById("toast");
+  toast.textContent = message;
+  toast.classList.add("show");
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => toast.classList.remove("show"), 2600);
+}
+function normaliseEntries(value) {
+  const list = Array.isArray(value) ? value : value && Array.isArray(value.entries) ? value.entries : null;
+  if (!list) throw new Error("Die JSON-Datei enthält keine Eintragsliste.");
+  return list.map((entry, index) => {
+    const mg = Number(entry.mg);
+    const ts = Number(entry.ts);
+    if (!Number.isFinite(mg) || mg <= 0 || !Number.isFinite(ts)) {
+      throw new Error(`Ungültiger Eintrag an Position ${index + 1}.`);
+    }
+    return {
+      id: Number.isFinite(Number(entry.id)) ? Number(entry.id) : Date.now() + index,
+      ts,
+      mg
+    };
+  });
+}
+
+/* ─────────── STORAGE ─────────── */
+let entries = [];
+function loadEntries() {
+  try { const r = localStorage.getItem(STORAGE_KEY); return r ? JSON.parse(r) : []; } catch { return []; }
+}
+function saveEntries() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries)); } catch {}
+}
+
+/* ─────────── TAB SWITCHING ─────────── */
+let currentTab = "home";
+function switchTab(id, btn) {
+  document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
+  document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+  document.getElementById(`tab-${id}`).classList.add("active");
+  btn.classList.add("active");
+  currentTab = id;
+  document.getElementById("content").scrollTop = 0;
+  if (id === "stats") renderStats();
+  if (id === "log")   renderLog();
+}
+
+/* ─────────── HOME ─────────── */
+function renderHome() {
+  const hour = new Date().getHours();
+  document.getElementById("greeting").textContent =
+    hour < 12 ? "Guten Morgen 👋" : hour < 18 ? "Guten Tag 👋" : "Guten Abend 👋";
+
+  const now = new Date();
+  const days = ["Sonntag","Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag"];
+  document.getElementById("hero-label").textContent = `Heute · ${days[now.getDay()]}`;
+
+  const todayKey = dateKey(Date.now());
+  const todayEntries = entries.filter(e => dateKey(e.ts) === todayKey);
+  const todayMg = todayEntries.reduce((s,e) => s+e.mg, 0);
+  document.getElementById("today-pouches").textContent = todayEntries.length;
+  document.getElementById("today-mg").innerHTML = `${todayMg}<small>mg</small>`;
+  document.getElementById("total-pouches").textContent = entries.length;
+
+  // streak
+  let streak = 0;
+  for (let i=0;;i++) {
+    const d = new Date(); d.setDate(d.getDate()-i);
+    if (entries.some(e => dateKey(e.ts) === dateKey(d.getTime()))) streak++;
+    else break;
+  }
+  document.getElementById("streak-val").textContent = streak;
+
+  // last entry
+  const last = entries.length > 0 ? entries.reduce((a,b) => a.ts>b.ts?a:b) : null;
+  const lastEl = document.getElementById("last-entry");
+  if (last) {
+    lastEl.style.display = "flex";
+    document.getElementById("last-time").textContent = `${formatTime(last.ts)} Uhr`;
+    document.getElementById("last-mg").textContent = `${last.mg} mg`;
+  } else {
+    lastEl.style.display = "none";
+  }
+
+  // spark
+  const sparkData = [];
+  for (let i=6;i>=0;i--) {
+    const d = new Date(); d.setDate(d.getDate()-i);
+    sparkData.push(entries.filter(e=>dateKey(e.ts)===dateKey(d.getTime())).reduce((s,e)=>s+e.mg,0));
+  }
+  const maxSpark = Math.max(...sparkData, 1);
+  const sparkEl = document.getElementById("spark");
+  sparkEl.innerHTML = sparkData.map((v,i) => {
+    const h = Math.max((v/maxSpark)*100,4);
+    const bg = i===6 ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.25)";
+    return `<div class="spark-bar" style="height:${h}%;background:${bg};"></div>`;
+  }).join("");
+
+  // presets
+  const pr = document.getElementById("preset-row");
+  pr.innerHTML = PRESETS.map(mg =>
+    `<button class="preset-btn" onclick="quickAdd(${mg})">${mg}</button>`
+  ).join("");
+}
+
+function quickAdd(mg) {
+  addEntry({ id: Date.now(), ts: Date.now(), mg });
+}
+
+/* ─────────── STATS ─────────── */
+let chartMg = null, chartP = null;
+let rangeMg = "week", rangeP = "week";
+
+function setRange(chart, range, btn) {
+  const prefix = chart === "mg" ? "range-mg" : "range-p";
+  document.querySelectorAll(`#${prefix} .range-btn`).forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  if (chart === "mg") { rangeMg = range; }
+  else { rangeP = range; }
+  renderStats();
+}
+
+function getChartData(range) {
+  const now = new Date();
+  let labels=[], mgArr=[], pArr=[];
+  if (range==="week") {
+    for (let i=6;i>=0;i--) {
+      const d=new Date(now); d.setDate(d.getDate()-i);
+      const k=dateKey(d.getTime());
+      const es=entries.filter(e=>dateKey(e.ts)===k);
+      labels.push(`${d.getDate()}.${d.getMonth()+1}.`);
+      mgArr.push(es.reduce((s,e)=>s+e.mg,0));
+      pArr.push(es.length);
+    }
+  } else if (range==="month") {
+    for (let i=29;i>=0;i--) {
+      const d=new Date(now); d.setDate(d.getDate()-i);
+      const k=dateKey(d.getTime());
+      const es=entries.filter(e=>dateKey(e.ts)===k);
+      labels.push(`${d.getDate()}.${d.getMonth()+1}.`);
+      mgArr.push(es.reduce((s,e)=>s+e.mg,0));
+      pArr.push(es.length);
+    }
+  } else {
+    for (let i=11;i>=0;i--) {
+      const d=new Date(now); d.setMonth(d.getMonth()-i);
+      const mk=`${d.getFullYear()}-${pad(d.getMonth()+1)}`;
+      const es=entries.filter(e=>dateKey(e.ts).startsWith(mk));
+      const dm=new Set(es.map(e=>dateKey(e.ts))).size||1;
+      labels.push(mk.slice(5));
+      mgArr.push(Math.round(es.reduce((s,e)=>s+e.mg,0)/dm));
+      pArr.push(Math.round(es.length/dm));
+    }
+  }
+  return {labels, mgArr, pArr};
+}
+
+function renderChart(canvasId, labels, data, c1, c2, instance) {
+  const canvas = document.getElementById(canvasId);
+  const ctx = canvas.getContext("2d");
+  if (instance) instance.destroy();
+
+  const stroke = ctx.createLinearGradient(0,0,canvas.clientWidth || 300,0);
+  stroke.addColorStop(0, c1);
+  stroke.addColorStop(1, c2);
+  const fill = ctx.createLinearGradient(0,0,0,170);
+  fill.addColorStop(0, hexToRgba(c1, .22));
+  fill.addColorStop(1, "rgba(7,11,24,0)");
+
+  return new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        data,
+        borderColor: stroke,
+        backgroundColor: fill,
+        borderWidth: 3,
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        pointBackgroundColor: "#f8fafc",
+        pointBorderColor: c2,
+        pointBorderWidth: 2,
+        tension: .38,
+        fill: true
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { intersect: false, mode: "index" },
+      plugins: { legend: { display:false }, tooltip: {
+        backgroundColor: "rgba(15,23,42,.96)",
+        borderColor: "rgba(255,255,255,0.14)", borderWidth: 1,
+        titleColor: "#f8fafc", bodyColor: "#e2e8f0",
+        cornerRadius: 14, padding: 10,
+      }},
+      scales: {
+        x: { grid:{display:false}, ticks:{ color:"#718096", font:{size:9} }, border:{display:false} },
+        y: { beginAtZero: true, grid:{ color:"rgba(255,255,255,.055)" }, ticks:{ color:"#64748b", precision:0, font:{size:9} }, border:{display:false} }
+      },
+      animation: { duration: 450 }
+    }
+  });
+}
+
+function renderStats() {
+  // averages
+  const totalDays = Math.max(new Set(entries.map(e=>dateKey(e.ts))).size, 1);
+  document.getElementById("avg-pouches").textContent = (entries.length/totalDays).toFixed(1);
+  document.getElementById("avg-mg").textContent = `${Math.round(entries.reduce((s,e)=>s+e.mg,0)/totalDays)} mg`;
+
+  // countdowns
+  const cdEl = document.getElementById("countdowns");
+  cdEl.innerHTML = CAMPS.map(camp => {
+    const cd = getCountdown(camp.date);
+    const dateStr = camp.date.toLocaleDateString("de-CH",{day:"numeric",month:"long"});
+    const inside = cd.done
+      ? `<p style="color:#fff;font-weight:700;">Bereits vorbei 🎉</p>`
+      : `<div class="camp-nums">
+          <div><div class="camp-num">${cd.days}</div><div class="camp-unit">Tage</div></div>
+          <div><div class="camp-num">${cd.hours}</div><div class="camp-unit">Stunden</div></div>
+        </div>`;
+    return `<div class="camp-card">
+      <div class="deco"></div>
+      <p class="camp-lbl">${camp.icon} ${camp.label} · ${dateStr}</p>
+      ${inside}
+    </div>`;
+  }).join("");
+
+  // charts
+  const { labels, mgArr, pArr } = getChartData(rangeMg);
+  chartMg = renderChart("chart-mg", labels, mgArr, "#a78bfa","#38bdf8", chartMg);
+  const { labels: lp, mgArr: _m, pArr: pArr2 } = getChartData(rangeP);
+  chartP  = renderChart("chart-p",  lp,     pArr2, "#c4b5fd","#7dd3fc", chartP);
+}
+
+/* ─────────── LOG ─────────── */
+function renderLog() {
+  const el = document.getElementById("log-list");
+  if (entries.length === 0) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><p>Noch keine Einträge</p></div>`;
+    return;
+  }
+  const sorted = [...entries].sort((a,b)=>b.ts-a.ts);
+  const map = {};
+  sorted.forEach(e => { const k=dateKey(e.ts); if(!map[k]) map[k]=[]; map[k].push(e); });
+  const groups = Object.entries(map).sort((a,b)=>b[0].localeCompare(a[0]));
+  el.innerHTML = groups.map(([dk, es]) => {
+    const dayTotal = es.reduce((s,e)=>s+e.mg,0);
+    const rows = es.map((e,i) => `
+      <div class="log-row">
+        <span class="log-time">${formatTime(e.ts)}</span>
+        <span class="badge">${e.mg} mg</span>
+        <div class="log-actions">
+          <button class="log-btn" onclick="openModal('edit',${e.id})">✏️</button>
+          <button class="log-btn del" onclick="deleteEntry(${e.id})">🗑️</button>
+        </div>
+      </div>
+    `).join("");
+    return `<div class="day-group">
+      <div class="day-header">
+        <span class="day-label">${formatDate(new Date(dk).getTime()+43200000)}</span>
+        <span class="badge">${dayTotal} mg</span>
+      </div>
+      <div class="log-list">${rows}</div>
+    </div>`;
+  }).join("");
+}
+
+
+/* ─────────── IMPORT / EXPORT ─────────── */
+async function exportEntries() {
+  const fileName = `pouchinator-export-${dateKey(Date.now())}.json`;
+  const payload = JSON.stringify({
+    app: "Pouchinator",
+    version: 2,
+    exportedAt: new Date().toISOString(),
+    entries: [...entries].sort((a,b) => a.ts - b.ts)
+  }, null, 2);
+  const blob = new Blob([payload], { type: "application/json" });
+  const file = new File([blob], fileName, { type: "application/json" });
+
+  // Best for iOS Home-Screen apps and Android PWAs: opens native share sheet with a real JSON file.
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "Pouchinator Export", text: "Pouchinator Backup" });
+      showToast("Export geteilt.");
+      return;
+    }
+  } catch (err) {
+    // User cancelled share sheet: no error toast needed.
+    if (err && err.name === "AbortError") return;
+  }
+
+  // Normal browser fallback.
+  try {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast("Export erstellt.");
+    return;
+  } catch (err) {}
+
+  // Last fallback for restrictive iOS contexts: show JSON so it can be copied/saved manually.
+  openExportFallback(payload, fileName);
+}
+
+function openExportFallback(payload, fileName) {
+  const win = window.open("", "_blank");
+  if (!win) {
+    navigator.clipboard?.writeText(payload);
+    showToast("Export kopiert. Falls nichts passiert ist: Pop-ups erlauben.");
+    return;
+  }
+  win.document.write(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>${fileName}</title><style>body{font-family:system-ui;background:#0f172a;color:#e2e8f0;padding:16px}pre{white-space:pre-wrap;word-break:break-word;background:#020617;padding:12px;border-radius:12px}</style></head><body><h1>${fileName}</h1><p>JSON kopieren oder über Teilen/Speichern sichern.</p><pre>${payload.replace(/[&<>]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]))}</pre></body></html>`);
+  win.document.close();
+  showToast("Export geöffnet.");
+}
+
+function importEntries(event) {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = "";
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const imported = normaliseEntries(JSON.parse(reader.result));
+      if (!confirm(`${imported.length} Einträge importieren? Bestehende Einträge werden ersetzt.`)) return;
+      entries = imported.sort((a,b) => a.ts - b.ts);
+      saveEntries();
+      refreshAll();
+      showToast("Import abgeschlossen.");
+    } catch (err) {
+      showToast(err.message || "Import fehlgeschlagen.");
+    }
+  };
+  reader.onerror = () => showToast("Datei konnte nicht gelesen werden.");
+  reader.readAsText(file);
+}
+
+/* ─────────── PWA INSTALL ─────────── */
+function updateInstallButton() {
+  const btn = document.getElementById("install-app-btn");
+  if (!btn) return;
+  const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
+  btn.classList.toggle("visible", !!deferredInstallPrompt && !standalone);
+}
+
+async function installApp() {
+  if (!deferredInstallPrompt) {
+    showToast("Im Browser-Menü: ›Zum Startbildschirm hinzufügen‹ wählen.");
+    return;
+  }
+  deferredInstallPrompt.prompt();
+  await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt = null;
+  updateInstallButton();
+}
+
+window.addEventListener("beforeinstallprompt", event => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  updateInstallButton();
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  updateInstallButton();
+  showToast("App installiert.");
+});
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("service-worker.js").catch(() => {});
+  });
+}
+
+/* ─────────── MODAL ─────────── */
+let editingId = null;
+
+function openModal(mode, id) {
+  editingId = id || null;
+  const overlay = document.getElementById("modal-overlay");
+  const title   = document.getElementById("modal-title");
+  const body    = document.getElementById("modal-body");
+
+  if (mode === "add") {
+    title.textContent = "Eintrag hinzufügen";
+    body.innerHTML = `
+      <div class="form-group">
+        <label class="form-label">Menge (mg)</label>
+        <input id="m-mg" class="form-input" type="number" placeholder="z.B. 6" step="0.5" min="0.5" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Datum & Uhrzeit</label>
+        <input id="m-dt" class="form-input" type="datetime-local" value="${toLocalDTValue(new Date())}" />
+      </div>
+      <button class="grad-btn" onclick="submitModal('add')">Hinzufügen</button>
+    `;
+  } else {
+    const entry = entries.find(e=>e.id===id);
+    title.textContent = "Eintrag bearbeiten";
+    body.innerHTML = `
+      <div class="form-group">
+        <label class="form-label">Menge (mg)</label>
+        <input id="m-mg" class="form-input" type="number" value="${entry.mg}" step="0.5" min="0.5" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Datum & Uhrzeit</label>
+        <input id="m-dt" class="form-input" type="datetime-local" value="${toLocalDTValue(new Date(entry.ts))}" />
+      </div>
+      <button class="grad-btn" onclick="submitModal('edit')">Speichern</button>
+    `;
+  }
+  overlay.classList.add("open");
+  setTimeout(() => document.getElementById("m-mg").focus(), 100);
+}
+
+function closeModal() {
+  document.getElementById("modal-overlay").classList.remove("open");
+  editingId = null;
+}
+
+function handleOverlayClick(e) {
+  if (e.target === document.getElementById("modal-overlay")) closeModal();
+}
+
+function submitModal(mode) {
+  const mg = parseFloat(document.getElementById("m-mg").value);
+  const dt = document.getElementById("m-dt").value;
+  if (!mg || mg <= 0 || !dt) return;
+  const ts = new Date(dt).getTime();
+  if (mode === "add") {
+    addEntry({ id: Date.now(), ts, mg });
+  } else {
+    editEntry({ id: editingId, ts, mg });
+  }
+  closeModal();
+}
+
+/* ─────────── CRUD ─────────── */
+function addEntry(entry) {
+  entries.push(entry);
+  saveEntries();
+  refreshAll();
+}
+function deleteEntry(id) {
+  entries = entries.filter(e => e.id !== id);
+  saveEntries();
+  refreshAll();
+}
+function editEntry(updated) {
+  entries = entries.map(e => e.id===updated.id ? {...e,...updated} : e);
+  saveEntries();
+  refreshAll();
+}
+function refreshAll() {
+  renderHome();
+  if (currentTab === "stats") renderStats();
+  if (currentTab === "log")   renderLog();
+  else renderLog(); // keep log in sync silently
+}
+
+/* ─────────── INIT ─────────── */
+entries = loadEntries();
+renderHome();
+renderLog();
+updateInstallButton();
+
+// refresh home every minute for countdowns / greeting
+setInterval(() => { renderHome(); if(currentTab==="stats") renderStats(); }, 60000);
+</script>
+</body>
+</html>
