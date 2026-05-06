@@ -27,6 +27,7 @@ import {
   toNumber,
 } from "./calculations.js";
 import {
+  downloadJson,
   downloadFullExport,
   mergeImportData,
   readJsonFile,
@@ -185,7 +186,10 @@ function renderDashboard() {
               <h2>Heute</h2>
               <p class="section-note">${formatDate(today)}</p>
             </div>
-            <span class="pill ${nutrition.calories_kcal <= goals.calorie_goal_kcal ? "ok" : "warn"}">${calorieBalanceText(nutrition.calories_kcal, goals.calorie_goal_kcal)}</span>
+            <div class="today-actions">
+              <span class="pill ${nutrition.calories_kcal <= goals.calorie_goal_kcal ? "ok" : "warn"}">${calorieBalanceText(nutrition.calories_kcal, goals.calorie_goal_kcal)}</span>
+              <button class="btn small primary" type="button" data-action="copy-chatgpt-daily-context">ChatGPT</button>
+            </div>
           </div>
           <div class="grid two">
             ${renderMetric("Kcal", `${fmt(nutrition.calories_kcal, 0)} / ${fmt(goals.calorie_goal_kcal, 0)}`, `${calorieBalanceText(nutrition.calories_kcal, goals.calorie_goal_kcal)}`)}
@@ -484,7 +488,6 @@ function renderMore() {
             <select name="sex">
               ${option("male", "männlich", settings.profile.sex)}
               ${option("female", "weiblich", settings.profile.sex)}
-              ${option("other", "anderes", settings.profile.sex)}
             </select>
           `)}
         </div>
@@ -599,6 +602,14 @@ async function handleActionClick(event) {
 
     if (action === "copy-yesterday") {
       await copyYesterdayFoods();
+    }
+
+    if (action === "copy-chatgpt-daily-context") {
+      await copyChatGptDailyContextToClipboard();
+    }
+
+    if (action === "open-chatgpt") {
+      openChatGpt();
     }
 
     if (action === "delete-food") {
@@ -961,7 +972,7 @@ async function saveProfileSettings(form) {
   const settings = structuredClone(data.settings);
   settings.profile.height_cm = optionalPositiveNumber(form, "height_cm", "Körpergrösse muss > 0 sein.");
   settings.profile.birth_date = formValue(form, "birth_date");
-  settings.profile.sex = formValue(form, "sex") || "male";
+  settings.profile.sex = normalizeSex(formValue(form, "sex"));
   await saveSettings(settings);
   showToast("Profil gespeichert.");
   await render();
@@ -1155,6 +1166,317 @@ function buildWeightStats() {
   };
 }
 
+function buildChatGptDailyContext() {
+  const today = todayKey();
+  const settings = data.settings;
+  const goals = settings.goals;
+  const nutrition = calculateDailyNutrition(data.food_entries, today);
+  const weightStats = buildWeightStats();
+
+  return {
+    schema_version: 1,
+    type: "chatgpt_daily_context",
+    generated_at: toLocalIso(),
+    date: today,
+    profile: {
+      birth_date: nullIfEmpty(settings.profile.birth_date),
+      age: calculateAge(settings.profile.birth_date),
+      sex: nullIfEmpty(settings.profile.sex),
+      height_cm: nullIfEmpty(settings.profile.height_cm),
+      current_weight_kg: nullIfEmpty(weightStats.latest?.weight_kg),
+      trend_weight_kg: nullIfEmpty(weightStats.avg7),
+      bmi: nullIfEmpty(weightStats.bmi),
+      body_fat_percent_navy: nullIfEmpty(weightStats.bodyFat),
+    },
+    goals: {
+      calories_kcal: nullIfEmpty(goals.calorie_goal_kcal),
+      protein_g: nullIfEmpty(goals.protein_goal_g),
+      carbs_g: nullIfEmpty(goals.carbs_goal_g),
+      fat_g: nullIfEmpty(goals.fat_goal_g),
+      fiber_g: nullIfEmpty(goals.fiber_goal_g),
+      sugar_max_g: nullIfEmpty(goals.sugar_max_g),
+      salt_max_g: nullIfEmpty(goals.salt_max_g),
+      weight_goal_kg: nullIfEmpty(goals.weight_goal_kg),
+      training_days_per_week: nullIfEmpty(goals.training_days_goal_per_week),
+      estimated_maintenance_kcal_range: {
+        min: nullIfEmpty(settings.maintenance.min_kcal),
+        max: nullIfEmpty(settings.maintenance.max_kcal),
+      },
+    },
+    current_status: {
+      calories: progressBlock(nutrition.calories_kcal, goals.calorie_goal_kcal, "kcal"),
+      protein: progressBlock(nutrition.protein_g, goals.protein_goal_g, "g"),
+      carbs: progressBlock(nutrition.carbs_g, goals.carbs_goal_g, "g"),
+      fat: progressBlock(nutrition.fat_g, goals.fat_goal_g, "g"),
+      fiber: progressBlockOptionalGoal(nutrition.fiber_g, goals.fiber_goal_g, "g"),
+      sugar: maxBlockOptional(nutrition.sugar_g, goals.sugar_max_g, "g"),
+      salt: maxBlockOptional(nutrition.salt_g, goals.salt_max_g, "g"),
+    },
+    today_food: data.food_entries
+      .filter((entry) => entry.date === today)
+      .map(cleanFoodForChatGpt),
+    today_training: data.workouts
+      .filter((workout) => workout.date === today)
+      .map(cleanWorkoutForChatGpt),
+    recent_weight: {
+      latest: weightStats.latest
+        ? {
+            date: weightStats.latest.date,
+            weight_kg: nullIfEmpty(weightStats.latest.weight_kg),
+            waist_cm: nullIfEmpty(weightStats.latest.waist_cm),
+            neck_cm: nullIfEmpty(weightStats.latest.neck_cm),
+            hip_cm: nullIfEmpty(weightStats.latest.hip_cm),
+          }
+        : null,
+      seven_day_average_kg: nullIfEmpty(weightStats.avg7),
+      change_since_start_kg: nullIfEmpty(weightStats.diffStart),
+      change_last_30_days_kg: nullIfEmpty(weightStats.diff30),
+    },
+    instructions: {
+      preferred_response_language: "de-CH",
+      task: "Hilf mir, den Rest des Tages bezüglich Kalorien, Protein und Training sinnvoll zu planen. Sei direkt und praktisch. Berücksichtige, was heute bereits gegessen und trainiert wurde. Gib konkrete Vorschläge für Mahlzeiten, Snack-Optionen und Prioritäten.",
+    },
+  };
+}
+
+async function copyChatGptDailyContextToClipboard() {
+  const context = buildChatGptDailyContext();
+  const json = JSON.stringify(context, null, 2);
+  const platform = getPlatformKind();
+
+  try {
+    let copiedAs = "text";
+
+    if (platform === "android") {
+      copiedAs = await copyJsonBlobToClipboard(json).catch(async () => {
+        await writeTextToClipboard(json);
+        return "text";
+      });
+    } else {
+      await writeTextToClipboard(json);
+    }
+
+    showChatGptCopiedDialog(copiedAs);
+  } catch (error) {
+    downloadJson(context, `julien-chatgpt-context-${context.date}.json`);
+    showToast("Zwischenablage nicht verfügbar. JSON wurde heruntergeladen.");
+  }
+}
+
+async function copyJsonBlobToClipboard(json) {
+  if (!navigator.clipboard || !window.ClipboardItem) {
+    throw new Error("ClipboardItem nicht unterstützt.");
+  }
+
+  const item = new ClipboardItem({
+    "application/json": new Blob([json], { type: "application/json" }),
+    "text/plain": new Blob([json], { type: "text/plain" }),
+  });
+
+  await navigator.clipboard.write([item]);
+  return "json";
+}
+
+async function writeTextToClipboard(text) {
+  if (!navigator.clipboard?.writeText) {
+    throw new Error("Zwischenablage nicht verfügbar.");
+  }
+
+  await navigator.clipboard.writeText(text);
+}
+
+function showChatGptCopiedDialog(copiedAs) {
+  document.querySelector("#chatgpt-copy-dialog")?.remove();
+
+  const formatText = copiedAs === "json"
+    ? "Der Kontext wurde als JSON in die Zwischenablage kopiert. Falls ChatGPT ihn nicht als Datei erkennt, kannst du ihn als Text einfügen."
+    : "Der Kontext wurde als JSON-Text in die Zwischenablage kopiert.";
+
+  const dialog = document.createElement("div");
+  dialog.id = "chatgpt-copy-dialog";
+  dialog.className = "modal-backdrop";
+  dialog.innerHTML = `
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="chatgpt-copy-title">
+      <h2 id="chatgpt-copy-title">Heute in Zwischenablage kopiert</h2>
+      <p>${safe(formatText)}</p>
+      <p class="section-note">Öffne ChatGPT und füge den Kontext in einen neuen Chat ein. Der Kontext enthält persönliche Trackingdaten.</p>
+      <div class="button-row">
+        <button class="btn primary" type="button" data-action="open-chatgpt">ChatGPT öffnen</button>
+        <button class="btn ghost" type="button" data-dialog-close>Schliessen</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(dialog);
+
+  dialog.addEventListener("click", (event) => {
+    if (event.target.closest("[data-action='open-chatgpt']")) {
+      openChatGpt();
+      return;
+    }
+
+    if (event.target === dialog || event.target.closest("[data-dialog-close]")) {
+      dialog.remove();
+    }
+  });
+}
+
+function openChatGpt() {
+  const fallback = window.setTimeout(() => {
+    window.location.href = "https://chatgpt.com/";
+  }, 900);
+
+  window.addEventListener(
+    "pagehide",
+    () => window.clearTimeout(fallback),
+    { once: true }
+  );
+
+  window.location.href = "chatgpt://";
+}
+
+function getPlatformKind() {
+  const ua = navigator.userAgent || "";
+  const platform = navigator.platform || "";
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isAndroid = /Android/.test(ua);
+
+  if (isIOS) return "ios";
+  if (isAndroid) return "android";
+  return "other";
+}
+
+function nullIfEmpty(value) {
+  return value === undefined || value === null || value === "" ? null : value;
+}
+
+function progressBlock(consumedRaw, goalRaw, unit) {
+  const consumed = toNumber(consumedRaw) || 0;
+  const goal = toNumber(goalRaw) || 0;
+
+  if (!goal || goal <= 0) {
+    return {
+      consumed,
+      goal: null,
+      remaining: null,
+      unit,
+      progress_percent: null,
+    };
+  }
+
+  return {
+    consumed,
+    goal,
+    remaining: Math.max(goal - consumed, 0),
+    unit,
+    progress_percent: round((consumed / goal) * 100, 1),
+  };
+}
+
+function progressBlockOptionalGoal(consumedRaw, goalRaw, unit) {
+  const consumed = consumedRaw === null || consumedRaw === undefined ? null : toNumber(consumedRaw) || 0;
+  const goal = goalRaw === null || goalRaw === undefined || goalRaw === "" ? null : toNumber(goalRaw) || 0;
+
+  if (!goal || goal <= 0) {
+    return {
+      consumed,
+      goal: null,
+      remaining: null,
+      unit,
+      progress_percent: null,
+    };
+  }
+
+  return {
+    consumed: consumed || 0,
+    goal,
+    remaining: Math.max(goal - (consumed || 0), 0),
+    unit,
+    progress_percent: round(((consumed || 0) / goal) * 100, 1),
+  };
+}
+
+function maxBlockOptional(consumedRaw, maxRaw, unit) {
+  const consumed = consumedRaw === null || consumedRaw === undefined ? null : toNumber(consumedRaw) || 0;
+  const max = maxRaw === null || maxRaw === undefined || maxRaw === "" ? null : toNumber(maxRaw) || 0;
+
+  if (!max || max <= 0) {
+    return {
+      consumed,
+      max: null,
+      remaining: null,
+      unit,
+      progress_percent: null,
+    };
+  }
+
+  return {
+    consumed: consumed || 0,
+    max,
+    remaining: Math.max(max - (consumed || 0), 0),
+    unit,
+    progress_percent: round(((consumed || 0) / max) * 100, 1),
+  };
+}
+
+function cleanFoodForChatGpt(entry) {
+  return {
+    meal: entry.meal || "",
+    meal_label: mealLabel(entry.meal),
+    name: entry.name || "",
+    quantity: nullIfEmpty(entry.quantity),
+    unit: entry.unit || null,
+    calories_kcal: toNumber(entry.calories_kcal) || 0,
+    protein_g: toNumber(entry.protein_g) || 0,
+    carbs_g: toNumber(entry.carbs_g) || 0,
+    fat_g: toNumber(entry.fat_g) || 0,
+    fiber_g: nullIfEmpty(entry.fiber_g),
+    sugar_g: nullIfEmpty(entry.sugar_g),
+    salt_g: nullIfEmpty(entry.salt_g),
+    notes: entry.notes || "",
+  };
+}
+
+function mealLabel(mealValue) {
+  return MEALS.find((meal) => meal.value === mealValue)?.label || "Ohne Mahlzeit";
+}
+
+function cleanWorkoutForChatGpt(workout) {
+  if (workout.type === "strength") {
+    return {
+      type: "strength",
+      name: workout.name || "Krafttraining",
+      duration_min: nullIfEmpty(workout.duration_min),
+      exercises: (workout.exercises || []).map((exercise) => ({
+        name: exercise.name || "",
+        sets: (exercise.sets || []).map((set) => ({
+          weight_kg: nullIfEmpty(set.weight_kg),
+          reps: nullIfEmpty(set.reps),
+        })),
+      })),
+      notes: workout.notes || "",
+    };
+  }
+
+  if (workout.type === "cardio") {
+    return {
+      type: "cardio",
+      name: workout.name || "Cardio",
+      duration_min: nullIfEmpty(workout.duration_min),
+      distance_km: nullIfEmpty(workout.distance_km),
+      speed_kmh: nullIfEmpty(workout.speed_kmh),
+      notes: workout.notes || "",
+    };
+  }
+
+  return {
+    type: workout.type || "other",
+    name: workout.name || "Training",
+    duration_min: nullIfEmpty(workout.duration_min),
+    notes: workout.notes || "",
+  };
+}
+
 function diffSince(entries, endDate, days) {
   const target = formatDateKey(addDays(parseDateKey(endDate), -days));
   const previous = [...entries].reverse().find((entry) => entry.date <= target);
@@ -1181,8 +1503,11 @@ function highestWeekText(stats) {
 function bodyFatMissingText() {
   const sex = data.settings.profile.sex;
   if (sex === "female") return "Bauch, Hals und Hüfte erfassen.";
-  if (sex === "other") return "Formel in Version 1 nicht gesetzt.";
   return "Bauch- und Halsumfang erfassen.";
+}
+
+function normalizeSex(sex) {
+  return sex === "female" ? "female" : "male";
 }
 
 function renderWeightHistory() {
