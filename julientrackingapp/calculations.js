@@ -42,17 +42,58 @@ export function calculateNavyBodyFat({ sex, heightCm, waistCm, neckCm, hipCm }) 
     return null;
   }
 
-  if (sex === "male") {
-    const abdomenMinusNeck = waist - neck;
+  const cmToInch = 1 / 2.54;
+
+  const heightIn = height * cmToInch;
+  const waistIn = waist * cmToInch;
+  const neckIn = neck * cmToInch;
+  const hipIn = hip ? hip * cmToInch : null;
+
+  function calculateMale() {
+    const abdomenMinusNeck = waistIn - neckIn;
     if (abdomenMinusNeck <= 0) return null;
-    return 495 / (1.0324 - 0.19077 * Math.log10(abdomenMinusNeck) + 0.15456 * Math.log10(height)) - 450;
+
+    return (
+      495 /
+        (1.0324 -
+          0.19077 * Math.log10(abdomenMinusNeck) +
+          0.15456 * Math.log10(heightIn)) -
+      450
+    );
+  }
+
+  function calculateFemale() {
+    if (!hipIn || hipIn <= 0) return null;
+
+    const waistPlusHipMinusNeck = waistIn + hipIn - neckIn;
+    if (waistPlusHipMinusNeck <= 0) return null;
+
+    return (
+      495 /
+        (1.29579 -
+          0.35004 * Math.log10(waistPlusHipMinusNeck) +
+          0.221 * Math.log10(heightIn)) -
+      450
+    );
+  }
+
+  if (sex === "male") {
+    return calculateMale();
   }
 
   if (sex === "female") {
-    if (!hip || hip <= 0) return null;
-    const waistPlusHipMinusNeck = waist + hip - neck;
-    if (waistPlusHipMinusNeck <= 0) return null;
-    return 495 / (1.29579 - 0.35004 * Math.log10(waistPlusHipMinusNeck) + 0.221 * Math.log10(height)) - 450;
+    return calculateFemale();
+  }
+
+  if (sex === "other") {
+    const male = calculateMale();
+    const female = calculateFemale();
+
+    if (male !== null && female !== null) {
+      return (male + female) / 2;
+    }
+
+    return male ?? female ?? null;
   }
 
   return null;
