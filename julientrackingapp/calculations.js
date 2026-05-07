@@ -42,7 +42,7 @@ export function calculateNavyBodyFat({ sex, heightCm, waistCm, neckCm, hipCm }) 
     return null;
   }
 
-  const cmToInch = 1 / 2.54;
+  const cmToInch = 1;
 
   const heightIn = height * cmToInch;
   const waistIn = waist * cmToInch;
