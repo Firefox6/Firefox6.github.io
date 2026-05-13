@@ -409,6 +409,9 @@ function renderCalories() {
 function renderTraining() {
   const weekly = calculateWeeklyTrainingStats(data.workouts, todayKey());
   const thisWeek = weekly.thisWeek;
+  const goal = toNumber(data.settings.goals.training_days_goal_per_week) || 0;
+  const goalText = goal ? `${fmt(Math.min(thisWeek.total, goal), 0)} von ${fmt(goal, 0)} Trainingstagen` : "Kein Wochenziel gesetzt";
+  const goalProgress = goal ? Math.min(100, (thisWeek.total / goal) * 100) : 0;
 
   return `
     <section class="grid auto">
@@ -418,50 +421,79 @@ function renderTraining() {
       ${renderMetricCard("Volumen", `${fmt(thisWeek.volume, 0)} kg`, "Kraft")}
     </section>
 
-    <section class="card">
-      <div class="section-head">
-        <div>
-          <h2>Training erfassen</h2>
-          <p class="section-note">Kraft, Cardio oder sonstige Einheit.</p>
-        </div>
-      </div>
-      <div class="segmented" role="group" aria-label="Trainingstyp">
-        ${workoutTypeButton("strength", "Kraft")}
-        ${workoutTypeButton("cardio", "Cardio")}
-        ${workoutTypeButton("other", "Sonstiges")}
-      </div>
-      <div style="margin-top: 16px;">
-        ${state.workoutType === "strength" ? renderStrengthWorkoutForm() : ""}
-        ${state.workoutType === "cardio" ? renderCardioWorkoutForm() : ""}
-        ${state.workoutType === "other" ? renderOtherWorkoutForm() : ""}
-      </div>
-    </section>
+    <section class="training-layout">
+      <div class="screen-stack">
+        <article class="card training-entry-card">
+          <div class="section-head">
+            <div>
+              <h2>Training erfassen</h2>
+              <p class="section-note">Eine Einheit auswählen, Daten eintragen, speichern.</p>
+            </div>
+          </div>
+          <div class="segmented training-type-tabs" role="group" aria-label="Trainingstyp">
+            ${workoutTypeButton("strength", "Kraft")}
+            ${workoutTypeButton("cardio", "Cardio")}
+            ${workoutTypeButton("other", "Sonstiges")}
+          </div>
+          <div class="training-form-panel">
+            ${state.workoutType === "strength" ? renderStrengthWorkoutForm() : ""}
+            ${state.workoutType === "cardio" ? renderCardioWorkoutForm() : ""}
+            ${state.workoutType === "other" ? renderOtherWorkoutForm() : ""}
+          </div>
+        </article>
 
-    <section class="card">
-      <div class="section-head">
-        <div>
-          <h2>Übungs-Presets</h2>
-          <p class="section-note">Für schnelle Krafttraining-Eingabe.</p>
-        </div>
+        <article class="card">
+          <div class="section-head">
+            <div>
+              <h2>Historie</h2>
+              <p class="section-note">Neueste Einheiten zuerst.</p>
+            </div>
+          </div>
+          ${renderWorkoutList()}
+        </article>
       </div>
-      ${renderExercisePresetForm()}
-      <div style="height: 14px;"></div>
-      ${renderExercisePresetList()}
-    </section>
 
-    <section class="card">
-      <div class="section-head">
-        <div>
-          <h2>Wochenübersicht</h2>
-          <p class="section-note">Trainingstage und Kraftvolumen.</p>
-        </div>
-      </div>
-      <canvas class="chart-canvas" data-chart="training-weeks" aria-label="Training pro Woche"></canvas>
-    </section>
+      <aside class="screen-stack">
+        <article class="card">
+          <div class="section-head">
+            <div>
+              <h2>Wochenziel</h2>
+              <p class="section-note">${safe(goalText)}</p>
+            </div>
+          </div>
+          <div class="progress"><span style="width: ${attr(goalProgress)}%;"></span></div>
+          <div class="pill-row training-summary-pills">
+            <span class="pill">${fmt(thisWeek.total, 0)} gesamt</span>
+            <span class="pill">${fmt(thisWeek.strength, 0)} Kraft</span>
+            <span class="pill">${fmt(thisWeek.cardio, 0)} Cardio</span>
+          </div>
+        </article>
 
-    <section class="card">
-      <h2>Historie</h2>
-      ${renderWorkoutList()}
+        <article class="card">
+          <div class="section-head">
+            <div>
+              <h2>Wochenübersicht</h2>
+              <p class="section-note">Trainingstage der letzten Wochen.</p>
+            </div>
+          </div>
+          <canvas class="chart-canvas" data-chart="training-weeks" aria-label="Training pro Woche"></canvas>
+        </article>
+
+        <article class="card">
+          <details class="training-presets">
+            <summary>
+              <span>
+                <strong>Übungs-Presets</strong>
+                <small>Für schnelle Krafttraining-Eingabe</small>
+              </span>
+            </summary>
+            <div class="training-presets-body">
+              ${renderExercisePresetForm()}
+              ${renderExercisePresetList()}
+            </div>
+          </details>
+        </article>
+      </aside>
     </section>
   `;
 }
@@ -635,21 +667,21 @@ async function handleActionClick(event) {
 
     if (action === "remove-draft-exercise") {
       syncStrengthDraftFromDOM();
-      state.strengthDraft.splice(Number(button.dataset.exerciseIndex), 1);
+      state.strengthDraft.splice(Number(button.dataset.targetExerciseIndex), 1);
       await render();
     }
 
     if (action === "add-draft-set") {
       syncStrengthDraftFromDOM();
-      const index = Number(button.dataset.exerciseIndex);
+      const index = Number(button.dataset.targetExerciseIndex);
       state.strengthDraft[index]?.sets.push({ weight_kg: "", reps: "" });
       await render();
     }
 
     if (action === "remove-draft-set") {
       syncStrengthDraftFromDOM();
-      const exerciseIndex = Number(button.dataset.exerciseIndex);
-      const setIndex = Number(button.dataset.setIndex);
+      const exerciseIndex = Number(button.dataset.targetExerciseIndex);
+      const setIndex = Number(button.dataset.targetSetIndex);
       state.strengthDraft[exerciseIndex]?.sets.splice(setIndex, 1);
       await render();
     }
@@ -729,6 +761,10 @@ function handleInput(event) {
 
   if (["cardio-duration", "cardio-distance", "cardio-speed"].includes(target.id)) {
     autoFillCardio(target.id);
+  }
+
+  if (["exercise_name", "set_weight", "set_reps"].includes(target.name)) {
+    updateStrengthDraftSummaryFromDOM();
   }
 
   if (["preset-select", "preset-quantity"].includes(target.id)) {
@@ -1665,10 +1701,15 @@ function renderFoodPresetList() {
 }
 
 function renderStrengthWorkoutForm() {
+  const stats = strengthDraftStats();
+
   return `
     <div class="screen-stack">
-      <div class="card soft">
-        <h3>Übung hinzufügen</h3>
+      <div class="training-exercise-picker">
+        <div>
+          <h3>Übung hinzufügen</h3>
+          <p class="section-note">Preset wählen oder direkt einen Namen eintragen.</p>
+        </div>
         <div class="form-grid">
           ${field("Aus Preset", `
             <select id="draft-exercise-preset">
@@ -1690,43 +1731,71 @@ function renderStrengthWorkoutForm() {
           ${field("Dauer Minuten", `<input type="number" name="duration_min" min="0" step="1">`)}
           ${field("Notiz", `<textarea name="notes"></textarea>`, "full")}
         </div>
+        <div class="pill-row training-summary-pills" aria-label="Krafttraining Entwurf">
+          <span class="pill"><span data-strength-stat="exercises">${fmt(stats.exercises, 0)}</span> Übungen</span>
+          <span class="pill"><span data-strength-stat="sets">${fmt(stats.sets, 0)}</span> Sätze</span>
+          <span class="pill"><span data-strength-stat="volume">${fmt(stats.volume, 0)}</span> kg Volumen</span>
+        </div>
         ${renderStrengthDraft()}
-        <button class="btn primary" type="submit">Krafttraining speichern</button>
+        <div class="training-save-row">
+          <button class="btn primary" type="submit">Krafttraining speichern</button>
+        </div>
       </form>
     </div>
   `;
 }
 
+function strengthDraftStats() {
+  return state.strengthDraft.reduce((total, exercise) => {
+    const sets = (exercise.sets || []).filter((set) => toNumber(set.reps) > 0);
+    const volume = sets.reduce((sum, set) => sum + ((toNumber(set.weight_kg) || 0) * (toNumber(set.reps) || 0)), 0);
+    return {
+      exercises: total.exercises + (exercise.name ? 1 : 0),
+      sets: total.sets + sets.length,
+      volume: total.volume + volume,
+    };
+  }, { exercises: 0, sets: 0, volume: 0 });
+}
+
 function renderStrengthDraft() {
   if (!state.strengthDraft.length) {
-    return `<div class="empty">Noch keine Übung im Training.</div>`;
+    return `<div class="empty">Noch keine Übung im Training. Füge zuerst eine Übung hinzu, dann die Sätze.</div>`;
   }
 
   return `
-    <div class="screen-stack">
+    <div class="strength-draft-list">
       ${state.strengthDraft.map((exercise, exerciseIndex) => `
         <div class="draft-exercise" data-exercise-index="${exerciseIndex}">
-          <div class="section-head">
+          <div class="exercise-head">
             ${field("Übung", `<input name="exercise_name" value="${attr(exercise.name)}">`)}
-            <button class="btn small danger" type="button" data-action="remove-draft-exercise" data-exercise-index="${exerciseIndex}">Entfernen</button>
+            <button class="btn small danger" type="button" data-action="remove-draft-exercise" data-target-exercise-index="${exerciseIndex}">Entfernen</button>
           </div>
           <input type="hidden" name="exercise_id" value="${attr(exercise.exercise_id || "")}">
-          <table class="set-table">
-            <thead>
-              <tr><th>Set</th><th>Gewicht kg</th><th>Wdh.</th><th></th></tr>
-            </thead>
-            <tbody>
-              ${(exercise.sets || []).map((set, setIndex) => `
-                <tr data-set-index="${setIndex}">
-                  <td>${setIndex + 1}</td>
-                  <td><input name="set_weight" type="number" min="0" step="0.5" value="${attr(set.weight_kg ?? "")}"></td>
-                  <td><input name="set_reps" type="number" min="0" step="1" value="${attr(set.reps ?? "")}"></td>
-                  <td><button class="btn small danger" type="button" data-action="remove-draft-set" data-exercise-index="${exerciseIndex}" data-set-index="${setIndex}">Löschen</button></td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table>
-          <button class="btn small ghost" type="button" data-action="add-draft-set" data-exercise-index="${exerciseIndex}">Set hinzufügen</button>
+          <div class="set-list" role="group" aria-label="Sätze">
+            <div class="set-row set-row-head" aria-hidden="true">
+              <span>Set</span>
+              <span>Gewicht</span>
+              <span>Wdh.</span>
+              <span></span>
+            </div>
+            ${(exercise.sets || []).map((set, setIndex) => `
+              <div class="set-row" data-set-index="${setIndex}">
+                <div class="set-number">${setIndex + 1}</div>
+                <label class="set-field">
+                  <span>kg</span>
+                  <input name="set_weight" type="number" min="0" step="0.5" value="${attr(set.weight_kg ?? "")}">
+                </label>
+                <label class="set-field">
+                  <span>Wdh.</span>
+                  <input name="set_reps" type="number" min="0" step="1" value="${attr(set.reps ?? "")}">
+                </label>
+                <button class="btn small danger" type="button" data-action="remove-draft-set" data-target-exercise-index="${exerciseIndex}" data-target-set-index="${setIndex}">Löschen</button>
+              </div>
+            `).join("")}
+          </div>
+          <div class="button-row">
+            <button class="btn small ghost" type="button" data-action="add-draft-set" data-target-exercise-index="${exerciseIndex}">Set hinzufügen</button>
+          </div>
         </div>
       `).join("")}
     </div>
@@ -1825,11 +1894,11 @@ function renderWorkoutList() {
 }
 
 function syncStrengthDraftFromDOM() {
-  const draftNodes = document.querySelectorAll("[data-exercise-index]");
+  const draftNodes = document.querySelectorAll(".draft-exercise[data-exercise-index]");
   if (!draftNodes.length) return;
 
   state.strengthDraft = [...draftNodes].map((node) => {
-    const sets = [...node.querySelectorAll("[data-set-index]")].map((setNode) => ({
+    const sets = [...node.querySelectorAll(".set-row[data-set-index]")].map((setNode) => ({
       weight_kg: setNode.querySelector("[name='set_weight']")?.value || "",
       reps: setNode.querySelector("[name='set_reps']")?.value || "",
     }));
@@ -1840,6 +1909,31 @@ function syncStrengthDraftFromDOM() {
       sets,
     };
   });
+}
+
+function updateStrengthDraftSummaryFromDOM() {
+  const draftNodes = document.querySelectorAll(".draft-exercise[data-exercise-index]");
+  if (!draftNodes.length) return;
+
+  const stats = [...draftNodes].reduce((total, node) => {
+    const name = node.querySelector("[name='exercise_name']")?.value?.trim() || "";
+    const sets = [...node.querySelectorAll(".set-row[data-set-index]")].filter((setNode) => toNumber(setNode.querySelector("[name='set_reps']")?.value) > 0);
+    const volume = sets.reduce((sum, setNode) => {
+      const weight = toNumber(setNode.querySelector("[name='set_weight']")?.value) || 0;
+      const reps = toNumber(setNode.querySelector("[name='set_reps']")?.value) || 0;
+      return sum + (weight * reps);
+    }, 0);
+
+    return {
+      exercises: total.exercises + (name ? 1 : 0),
+      sets: total.sets + sets.length,
+      volume: total.volume + volume,
+    };
+  }, { exercises: 0, sets: 0, volume: 0 });
+
+  document.querySelector("[data-strength-stat='exercises']").textContent = fmt(stats.exercises, 0);
+  document.querySelector("[data-strength-stat='sets']").textContent = fmt(stats.sets, 0);
+  document.querySelector("[data-strength-stat='volume']").textContent = fmt(stats.volume, 0);
 }
 
 function addDraftExerciseFromForm() {

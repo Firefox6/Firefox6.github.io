@@ -1,4 +1,4 @@
-const CACHE_NAME = "julien-tracking-cache-v4";
+const CACHE_NAME = "julien-tracking-cache-v5";
 
 const CORE_ASSETS = [
   "./",
