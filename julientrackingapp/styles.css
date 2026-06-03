@@ -200,8 +200,6 @@ h3 {
 
 .dashboard-today {
   display: grid;
-  max-width: 760px;
-  margin: 0 auto;
 }
 
 .card {
@@ -566,6 +564,11 @@ form > button {
 
 .training-toggle input {
   position: absolute;
+  width: 1px;
+  min-height: 0;
+  height: 1px;
+  margin: 0;
+  padding: 0;
   opacity: 0;
   pointer-events: none;
 }
@@ -704,10 +707,13 @@ form > button {
 
 .toast {
   position: fixed;
+  left: 16px;
   right: 16px;
   bottom: calc(92px + var(--safe-bottom));
   z-index: 60;
+  width: fit-content;
   max-width: min(420px, calc(100vw - 32px));
+  margin-left: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--text);
@@ -773,6 +779,12 @@ form > button {
   .bottom-nav {
     gap: 2px;
     padding-inline: 6px;
+  }
+
+  .btn.small {
+    min-height: 40px;
+    padding: 8px 12px;
+    font-size: 0.82rem;
   }
 
   .nav-item span {
