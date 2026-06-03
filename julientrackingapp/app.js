@@ -52,11 +52,11 @@ const TAB_TITLES = {
 };
 
 const MEALS = [
-  { value: "breakfast", label: "FrÃ¼hstÃ¼ck" },
+  { value: "breakfast", label: "Frühstück" },
   { value: "lunch", label: "Mittag" },
   { value: "dinner", label: "Abend" },
   { value: "snack", label: "Snack" },
-  { value: "drinks", label: "GetrÃ¤nke" },
+  { value: "drinks", label: "Getränke" },
   { value: "other", label: "Sonstiges" },
   { value: "", label: "Ohne Mahlzeit" },
 ];
@@ -95,7 +95,7 @@ async function init() {
   bindEvents();
   const migration = await migrateLegacyLocalStorageData();
   if (migration.migrated) {
-    showToast("Alte lokale Daten wurden sicher Ã¼bernommen.");
+    showToast("Alte lokale Daten wurden sicher übernommen.");
   }
   await render();
   registerServiceWorker();
@@ -205,10 +205,11 @@ function renderDashboardV2() {
   const trainingStats = calculateWeeklyTrainingStats(data.workouts, today).thisWeek;
   const avgCalories7 = average(lastNDays(today, 7).map((date) => calculateDailyNutrition(data.food_entries, date).calories_kcal));
   const calorieProgress = percent(nutrition.calories_kcal, goals.calorie_goal_kcal);
+  const proteinProgress = percent(nutrition.protein_g, goals.protein_goal_g);
   const proteinOpen = Math.max((toNumber(goals.protein_goal_g) || 0) - (toNumber(nutrition.protein_g) || 0), 0);
   const calorieOpen = (toNumber(goals.calorie_goal_kcal) || 0) - (toNumber(nutrition.calories_kcal) || 0);
-  const activeTraining = [todayTraining.strength, todayTraining.cardio].filter(Boolean).length;
   const ringProgress = Math.min(Math.max(calorieProgress, 0), 100);
+  const proteinRingProgress = Math.min(Math.max(proteinProgress, 0), 100);
 
   return `
     <section class="dashboard-today">
@@ -217,12 +218,20 @@ function renderDashboardV2() {
           <div>
             <p class="today-kicker">${formatDate(today)}</p>
             <h2 class="today-title">Heute im Blick</h2>
-            <p class="today-subline">Kalorien, Protein, Training und Gewichtstrend auf einen Scan.</p>
+            <p class="today-subline">Kalorien und Protein auf einen Scan, ohne Umwege.</p>
           </div>
-          <div class="today-orbit" style="--ring: ${ringProgress}%">
-            <div>
-              <div class="today-orbit-value">${goals.calorie_goal_kcal ? fmt(calorieProgress, 0) : "0"}%</div>
-              <div class="today-orbit-label">Kcal Ziel</div>
+          <div class="today-orbit-stack">
+            <div class="today-orbit" style="--ring: ${ringProgress}%">
+              <div>
+                <div class="today-orbit-value">${goals.calorie_goal_kcal ? fmt(calorieProgress, 0) : "0"}%</div>
+                <div class="today-orbit-label">Kcal Ziel</div>
+              </div>
+            </div>
+            <div class="today-orbit protein-orbit" style="--ring: ${proteinRingProgress}%">
+              <div>
+                <div class="today-orbit-value">${goals.protein_goal_g ? fmt(proteinProgress, 0) : "0"}%</div>
+                <div class="today-orbit-label">Protein</div>
+              </div>
             </div>
           </div>
         </div>
@@ -235,14 +244,6 @@ function renderDashboardV2() {
           <div class="quick-stat">
             <span>Protein offen</span>
             <strong>${fmt(proteinOpen, 0)} g</strong>
-          </div>
-          <div class="quick-stat">
-            <span>Training</span>
-            <strong>${activeTraining}/2 heute</strong>
-          </div>
-          <div class="quick-stat">
-            <span>Trend</span>
-            <strong>${weightStats.avg7 ? `${fmt(weightStats.avg7, 1)} kg` : "-"}</strong>
           </div>
         </div>
 
@@ -258,7 +259,7 @@ function renderDashboardV2() {
         <div class="section-head">
           <div>
             <h2>Tagesziele</h2>
-            <p class="section-note">${calorieOpen >= 0 ? `${fmt(calorieOpen, 0)} kcal uebrig` : `${fmt(Math.abs(calorieOpen), 0)} kcal drueber`}.</p>
+            <p class="section-note">${calorieOpen >= 0 ? `${fmt(calorieOpen, 0)} kcal übrig` : `${fmt(Math.abs(calorieOpen), 0)} kcal drüber`}.</p>
           </div>
         </div>
         <div class="primary-progress-grid">
@@ -279,7 +280,7 @@ function renderDashboardV2() {
             <p class="section-note">Heute nach Zielwerten.</p>
           </div>
         </div>
-        <div class="nutrient-list" aria-label="Naehrwerte heute">
+        <div class="nutrient-list" aria-label="Nährwerte heute">
           ${renderNutrientRow("KH", nutrition.carbs_g, "g", goals.carbs_goal_g)}
           ${renderNutrientRow("Fett", nutrition.fat_g, "g", goals.fat_goal_g)}
           ${renderNutrientRow("Ballaststoffe", nutrition.fiber_g, "g", goals.fiber_goal_g)}
@@ -320,7 +321,7 @@ function renderCaloriesV2() {
     <section class="card">
       <div class="section-head">
         <div>
-          <h2>TagesÃ¼bersicht</h2>
+          <h2>Tagesübersicht</h2>
           <p class="section-note">${formatDate(state.selectedDate)}</p>
         </div>
         <div class="field" style="min-width: 170px;">
@@ -339,13 +340,13 @@ function renderCaloriesV2() {
         ${renderProgressRow("Protein", nutrition.protein_g, goals.protein_goal_g, "g", { kind: "protein" })}
         ${nutrition.hasOptional ? renderOptionalNutrition(nutrition) : ""}
       </div>
-      <p class="section-note" style="margin-top: 12px;">Estimated Maintenance: ${fmt(data.settings.maintenance.min_kcal, 0)}â€“${fmt(data.settings.maintenance.max_kcal, 0)} kcal. ${maintenanceText(maintenance)}</p>
+      <p class="section-note" style="margin-top: 12px;">Estimated Maintenance: ${fmt(data.settings.maintenance.min_kcal, 0)}–${fmt(data.settings.maintenance.max_kcal, 0)} kcal. ${maintenanceText(maintenance)}</p>
     </section>
 
     <section class="card">
       <div class="section-head">
         <div>
-          <h2>EintrÃ¤ge</h2>
+          <h2>Einträge</h2>
           <p class="section-note">Gruppiert nach Mahlzeit.</p>
         </div>
       </div>
@@ -411,10 +412,10 @@ function renderMoreV2() {
 
   return `
     <section class="grid auto">
-      ${renderMetricCard("Alter", age !== null ? fmt(age, 0) : "â€“", "aus Geburtsdatum")}
-      ${renderMetricCard("GrÃ¶sse", settings.profile.height_cm ? `${fmt(settings.profile.height_cm, 0)} cm` : "â€“", "Profil")}
-      ${renderMetricCard("Kalorienziel", goalSummary(settings.goals.calorie_goal_kcal, "kcal"), "primÃ¤r")}
-      ${renderMetricCard("Daten", `${data.weight_entries.length + data.food_entries.length + data.workouts.length}`, "EintrÃ¤ge")}
+      ${renderMetricCard("Alter", age !== null ? fmt(age, 0) : "–", "aus Geburtsdatum")}
+      ${renderMetricCard("Grösse", settings.profile.height_cm ? `${fmt(settings.profile.height_cm, 0)} cm` : "–", "Profil")}
+      ${renderMetricCard("Kalorienziel", goalSummary(settings.goals.calorie_goal_kcal, "kcal"), "primär")}
+      ${renderMetricCard("Daten", `${data.weight_entries.length + data.food_entries.length + data.workouts.length}`, "Einträge")}
     </section>
 
     <section class="card">
@@ -437,11 +438,11 @@ function renderMoreV2() {
       <h2>Profil</h2>
       <form id="settings-profile-form">
         <div class="form-grid">
-          ${field("KÃ¶rpergrÃ¶sse cm", `<input type="number" name="height_cm" min="1" step="1" value="${attr(settings.profile.height_cm ?? "")}">`)}
+          ${field("Körpergrösse cm", `<input type="number" name="height_cm" min="1" step="1" value="${attr(settings.profile.height_cm ?? "")}">`)}
           ${field("Geburtsdatum", `<input type="date" name="birth_date" value="${attr(settings.profile.birth_date || "")}">`)}
           ${field("Geschlecht", `
             <select name="sex">
-              ${option("male", "mÃ¤nnlich", settings.profile.sex)}
+              ${option("male", "männlich", settings.profile.sex)}
               ${option("female", "weiblich", settings.profile.sex)}
             </select>
           `)}
@@ -484,12 +485,12 @@ function renderMoreV2() {
       <h2>Erinnerungen</h2>
       <form id="settings-reminders-form">
         <div class="form-grid">
-          ${field("GrÃ¶sse prÃ¼fen alle X Tage", `<input type="number" name="height_check_interval_days" min="0" step="1" value="${attr(settings.reminders.height_check_interval_days ?? "")}">`)}
+          ${field("Grösse prüfen alle X Tage", `<input type="number" name="height_check_interval_days" min="0" step="1" value="${attr(settings.reminders.height_check_interval_days ?? "")}">`)}
           ${field("Backup alle X Tage", `<input type="number" name="backup_interval_days" min="0" step="1" value="${attr(settings.reminders.backup_interval_days ?? "")}">`)}
         </div>
         <div class="button-row">
           <button class="btn primary" type="submit">Erinnerungen speichern</button>
-          <button class="btn ghost" type="button" data-action="mark-height">GrÃ¶sse bestÃ¤tigt</button>
+          <button class="btn ghost" type="button" data-action="mark-height">Grösse bestätigt</button>
           <button class="btn ghost" type="button" data-action="mark-backup">Backup erledigt</button>
         </div>
       </form>
@@ -503,8 +504,8 @@ function renderMoreV2() {
         </div>
       </div>
       <div class="grid auto">
-        ${renderMetric("Gewicht", fmt(data.weight_entries.length, 0), "EintrÃ¤ge")}
-        ${renderMetric("Kalorien", fmt(data.food_entries.length, 0), "EintrÃ¤ge")}
+        ${renderMetric("Gewicht", fmt(data.weight_entries.length, 0), "Einträge")}
+        ${renderMetric("Kalorien", fmt(data.food_entries.length, 0), "Einträge")}
         ${renderMetric("Food-Presets", fmt(data.food_presets.length, 0), "gespeichert")}
         ${renderMetric("Trainings", fmt(data.workouts.filter((workout) => ["strength", "cardio"].includes(workout.type)).length, 0), "Haken")}
       </div>
@@ -516,7 +517,7 @@ function renderMoreV2() {
           ${field("Import-Datei", `<input type="file" name="import_file" accept="application/json" required>`)}
           ${field("Modus", `
             <select name="import_mode">
-              <option value="merge">ZusammenfÃ¼hren</option>
+              <option value="merge">Zusammenführen</option>
               <option value="replace">Alles ersetzen</option>
               <option value="presets">Nur Presets importieren</option>
             </select>
@@ -588,10 +589,10 @@ function renderDashboard() {
             </div>
           </div>
           <div class="grid auto">
-            ${renderMetric("Ã˜ Kcal 7 Tage", fmt(avgCalories7, 0), "Durchschnitt gegessen")}
-            ${renderMetric("Ã˜ Protein 7 Tage", `${fmt(avgProtein7, 0)}g`, "Durchschnitt")}
+            ${renderMetric("Ø Kcal 7 Tage", fmt(avgCalories7, 0), "Durchschnitt gegessen")}
+            ${renderMetric("Ø Protein 7 Tage", `${fmt(avgProtein7, 0)}g`, "Durchschnitt")}
             ${renderMetric("Protein 14 Tage", `${proteinHits14}/14`, "Tage im Ziel")}
-            ${renderMetric("Ã˜ Zielabweichung", `${fmtSigned(calorieDelta14, 0)} kcal`, "letzte 14 Tage")}
+            ${renderMetric("Ø Zielabweichung", `${fmtSigned(calorieDelta14, 0)} kcal`, "letzte 14 Tage")}
           </div>
         </article>
       </div>
@@ -604,12 +605,12 @@ function renderDashboard() {
               <p class="section-note">${weightStats.latest ? formatDate(weightStats.latest.date) : "Noch kein Eintrag"}</p>
             </div>
           </div>
-          <div class="big-number">${weightStats.latest ? `${fmt(weightStats.latest.weight_kg, 1)} kg` : "â€“"}</div>
+          <div class="big-number">${weightStats.latest ? `${fmt(weightStats.latest.weight_kg, 1)} kg` : "–"}</div>
           <div class="grid two" style="margin-top: 16px;">
-            ${renderMetric("7-Tage-Schnitt", weightStats.avg7 ? `${fmt(weightStats.avg7, 1)} kg` : "â€“", "Trendgewicht")}
-            ${renderMetric("Seit Start", weightStats.diffStart !== null ? `${fmtSigned(weightStats.diffStart, 1)} kg` : "â€“", "vom ersten Eintrag")}
-            ${renderMetric("Letzte 7 Tage", weightStats.diff7 !== null ? `${fmtSigned(weightStats.diff7, 1)} kg` : "â€“", "Tagesvergleich")}
-            ${renderMetric("Letzte 30 Tage", weightStats.diff30 !== null ? `${fmtSigned(weightStats.diff30, 1)} kg` : "â€“", "Tagesvergleich")}
+            ${renderMetric("7-Tage-Schnitt", weightStats.avg7 ? `${fmt(weightStats.avg7, 1)} kg` : "–", "Trendgewicht")}
+            ${renderMetric("Seit Start", weightStats.diffStart !== null ? `${fmtSigned(weightStats.diffStart, 1)} kg` : "–", "vom ersten Eintrag")}
+            ${renderMetric("Letzte 7 Tage", weightStats.diff7 !== null ? `${fmtSigned(weightStats.diff7, 1)} kg` : "–", "Tagesvergleich")}
+            ${renderMetric("Letzte 30 Tage", weightStats.diff30 !== null ? `${fmtSigned(weightStats.diff30, 1)} kg` : "–", "Tagesvergleich")}
           </div>
           <p class="section-note" style="margin-top: 14px;">${highestWeekText(weightStats)}</p>
         </article>
@@ -617,8 +618,8 @@ function renderDashboard() {
         <article class="card">
           <h2>BMI und KFA</h2>
           <div class="grid two">
-            ${renderMetric("BMI", weightStats.bmi ? fmt(weightStats.bmi, 1) : "â€“", weightStats.bmi ? getBMICategory(weightStats.bmi) : "GrÃ¶sse und Gewicht nÃ¶tig")}
-            ${renderMetric("KFA", weightStats.bodyFat ? `${fmt(weightStats.bodyFat, 1)}%` : "â€“", weightStats.bodyFat ? "Navy-Methode, SchÃ¤tzung" : `KFA nicht berechenbar - ${bodyFatMissingText()}`)}
+            ${renderMetric("BMI", weightStats.bmi ? fmt(weightStats.bmi, 1) : "–", weightStats.bmi ? getBMICategory(weightStats.bmi) : "Grösse und Gewicht nötig")}
+            ${renderMetric("KFA", weightStats.bodyFat ? `${fmt(weightStats.bodyFat, 1)}%` : "–", weightStats.bodyFat ? "Navy-Methode, Schätzung" : `KFA nicht berechenbar - ${bodyFatMissingText()}`)}
           </div>
         </article>
 
@@ -637,7 +638,7 @@ function renderDashboard() {
           <div class="kpi-row">
             <div class="kpi-main">
               <p class="kpi-title">Estimated Maintenance</p>
-              <p class="kpi-sub">${fmt(settings.maintenance.min_kcal, 0)}â€“${fmt(settings.maintenance.max_kcal, 0)} kcal</p>
+              <p class="kpi-sub">${fmt(settings.maintenance.min_kcal, 0)}–${fmt(settings.maintenance.max_kcal, 0)} kcal</p>
             </div>
             <div class="kpi-value">${maintenanceText(maintenance)}</div>
           </div>
@@ -654,14 +655,14 @@ function renderWeight() {
 
   return `
     <section class="grid auto">
-      ${renderMetricCard("Aktuell", stats.latest ? `${fmt(stats.latest.weight_kg, 1)} kg` : "â€“", stats.latest ? formatDate(stats.latest.date) : "Noch kein Eintrag")}
-      ${renderMetricCard("7-Tage-Schnitt", stats.avg7 ? `${fmt(stats.avg7, 1)} kg` : "â€“", "Trendgewicht")}
-      ${renderMetricCard("Startgewicht", stats.start ? `${fmt(stats.start.weight_kg, 1)} kg` : "â€“", "erster Eintrag")}
-      ${renderMetricCard("HÃ¶chstes Wochenmittel", stats.highestWeeklyAverage ? `${fmt(stats.highestWeeklyAverage.average, 1)} kg` : "â€“", stats.highestWeeklyAverage?.label || "â€“")}
-      ${renderMetricCard("Seit Start", stats.diffStart !== null ? `${fmtSigned(stats.diffStart, 1)} kg` : "â€“", "VerÃ¤nderung")}
-      ${renderMetricCard("Letzter Monat", stats.diff30 !== null ? `${fmtSigned(stats.diff30, 1)} kg` : "â€“", "30 Tage")}
-      ${renderMetricCard("BMI", stats.bmi ? `${fmt(stats.bmi, 1)}` : "â€“", stats.bmi ? getBMICategory(stats.bmi) : "nicht berechenbar")}
-      ${renderMetricCard("KFA", stats.bodyFat ? `${fmt(stats.bodyFat, 1)}%` : "â€“", stats.bodyFat ? "Navy-SchÃ¤tzung" : bodyFatMissingText())}
+      ${renderMetricCard("Aktuell", stats.latest ? `${fmt(stats.latest.weight_kg, 1)} kg` : "–", stats.latest ? formatDate(stats.latest.date) : "Noch kein Eintrag")}
+      ${renderMetricCard("7-Tage-Schnitt", stats.avg7 ? `${fmt(stats.avg7, 1)} kg` : "–", "Trendgewicht")}
+      ${renderMetricCard("Startgewicht", stats.start ? `${fmt(stats.start.weight_kg, 1)} kg` : "–", "erster Eintrag")}
+      ${renderMetricCard("Höchstes Wochenmittel", stats.highestWeeklyAverage ? `${fmt(stats.highestWeeklyAverage.average, 1)} kg` : "–", stats.highestWeeklyAverage?.label || "–")}
+      ${renderMetricCard("Seit Start", stats.diffStart !== null ? `${fmtSigned(stats.diffStart, 1)} kg` : "–", "Veränderung")}
+      ${renderMetricCard("Letzter Monat", stats.diff30 !== null ? `${fmtSigned(stats.diff30, 1)} kg` : "–", "30 Tage")}
+      ${renderMetricCard("BMI", stats.bmi ? `${fmt(stats.bmi, 1)}` : "–", stats.bmi ? getBMICategory(stats.bmi) : "nicht berechenbar")}
+      ${renderMetricCard("KFA", stats.bodyFat ? `${fmt(stats.bodyFat, 1)}%` : "–", stats.bodyFat ? "Navy-Schätzung" : bodyFatMissingText())}
     </section>
 
     <section class="card">
@@ -679,7 +680,7 @@ function renderWeight() {
           ${field("Gewicht kg", `<input type="number" name="weight_kg" inputmode="decimal" step="0.1" min="1" value="${attr(entry.weight_kg)}" required>`)}
           ${field("Bauchumfang cm", `<input type="number" name="waist_cm" inputmode="decimal" step="0.1" min="1" value="${attr(entry.waist_cm ?? "")}">`)}
           ${field("Halsumfang cm", `<input type="number" name="neck_cm" inputmode="decimal" step="0.1" min="1" value="${attr(entry.neck_cm ?? "")}">`)}
-          ${field("HÃ¼ftumfang cm", `<input type="number" name="hip_cm" inputmode="decimal" step="0.1" min="1" value="${attr(entry.hip_cm ?? "")}">`)}
+          ${field("Hüftumfang cm", `<input type="number" name="hip_cm" inputmode="decimal" step="0.1" min="1" value="${attr(entry.hip_cm ?? "")}">`)}
           ${field("Notiz", `<textarea name="notes">${safe(entry.notes || "")}</textarea>`, "full")}
         </div>
         <button class="btn primary" type="submit">Speichern</button>
@@ -714,7 +715,7 @@ function renderCalories() {
     <section class="card">
       <div class="section-head">
         <div>
-          <h2>TagesÃ¼bersicht</h2>
+          <h2>Tagesübersicht</h2>
           <p class="section-note">${formatDate(state.selectedDate)}</p>
         </div>
         <div class="field" style="min-width: 170px;">
@@ -733,7 +734,7 @@ function renderCalories() {
         ${renderProgressRow("Protein", nutrition.protein_g, goals.protein_goal_g, "g")}
         ${nutrition.hasOptional ? renderOptionalNutrition(nutrition) : ""}
       </div>
-      <p class="section-note" style="margin-top: 12px;">Estimated Maintenance: ${fmt(data.settings.maintenance.min_kcal, 0)}â€“${fmt(data.settings.maintenance.max_kcal, 0)} kcal. ${maintenanceText(maintenance)}</p>
+      <p class="section-note" style="margin-top: 12px;">Estimated Maintenance: ${fmt(data.settings.maintenance.min_kcal, 0)}–${fmt(data.settings.maintenance.max_kcal, 0)} kcal. ${maintenanceText(maintenance)}</p>
     </section>
 
     <section class="card">
@@ -751,7 +752,7 @@ function renderCalories() {
     <section class="card">
       <div class="section-head">
         <div>
-          <h2>EintrÃ¤ge</h2>
+          <h2>Einträge</h2>
           <p class="section-note">Gruppiert nach Mahlzeit.</p>
         </div>
       </div>
@@ -791,7 +792,7 @@ function renderTraining() {
           <div class="section-head">
             <div>
               <h2>Training erfassen</h2>
-              <p class="section-note">Eine Einheit auswÃ¤hlen, Daten eintragen, speichern.</p>
+              <p class="section-note">Eine Einheit auswählen, Daten eintragen, speichern.</p>
             </div>
           </div>
           <div class="segmented training-type-tabs" role="group" aria-label="Trainingstyp">
@@ -836,7 +837,7 @@ function renderTraining() {
         <article class="card">
           <div class="section-head">
             <div>
-              <h2>WochenÃ¼bersicht</h2>
+              <h2>Wochenübersicht</h2>
               <p class="section-note">Trainingstage der letzten Wochen.</p>
             </div>
           </div>
@@ -847,8 +848,8 @@ function renderTraining() {
           <details class="training-presets">
             <summary>
               <span>
-                <strong>Ãœbungs-Presets</strong>
-                <small>FÃ¼r schnelle Krafttraining-Eingabe</small>
+                <strong>Übungs-Presets</strong>
+                <small>Für schnelle Krafttraining-Eingabe</small>
               </span>
             </summary>
             <div class="training-presets-body">
@@ -868,21 +869,21 @@ function renderMore() {
 
   return `
     <section class="grid auto">
-      ${renderMetricCard("Alter", age !== null ? fmt(age, 0) : "â€“", "aus Geburtsdatum")}
-      ${renderMetricCard("GrÃ¶sse", settings.profile.height_cm ? `${fmt(settings.profile.height_cm, 0)} cm` : "â€“", "Profil")}
+      ${renderMetricCard("Alter", age !== null ? fmt(age, 0) : "–", "aus Geburtsdatum")}
+      ${renderMetricCard("Grösse", settings.profile.height_cm ? `${fmt(settings.profile.height_cm, 0)} cm` : "–", "Profil")}
       ${renderMetricCard("Kalorienziel", `${fmt(settings.goals.calorie_goal_kcal, 0)} kcal`, "manuell")}
-      ${renderMetricCard("Daten", `${data.weight_entries.length + data.food_entries.length + data.workouts.length}`, "EintrÃ¤ge")}
+      ${renderMetricCard("Daten", `${data.weight_entries.length + data.food_entries.length + data.workouts.length}`, "Einträge")}
     </section>
 
     <section class="card">
       <h2>Profil</h2>
       <form id="settings-profile-form">
         <div class="form-grid">
-          ${field("KÃ¶rpergrÃ¶sse cm", `<input type="number" name="height_cm" min="1" step="1" value="${attr(settings.profile.height_cm ?? "")}">`)}
+          ${field("Körpergrösse cm", `<input type="number" name="height_cm" min="1" step="1" value="${attr(settings.profile.height_cm ?? "")}">`)}
           ${field("Geburtsdatum", `<input type="date" name="birth_date" value="${attr(settings.profile.birth_date || "")}">`)}
           ${field("Geschlecht", `
             <select name="sex">
-              ${option("male", "mÃ¤nnlich", settings.profile.sex)}
+              ${option("male", "männlich", settings.profile.sex)}
               ${option("female", "weiblich", settings.profile.sex)}
             </select>
           `)}
@@ -924,12 +925,12 @@ function renderMore() {
       <h2>Erinnerungen</h2>
       <form id="settings-reminders-form">
         <div class="form-grid">
-          ${field("GrÃ¶sse prÃ¼fen alle X Tage", `<input type="number" name="height_check_interval_days" min="0" step="1" value="${attr(settings.reminders.height_check_interval_days ?? "")}">`)}
+          ${field("Grösse prüfen alle X Tage", `<input type="number" name="height_check_interval_days" min="0" step="1" value="${attr(settings.reminders.height_check_interval_days ?? "")}">`)}
           ${field("Backup alle X Tage", `<input type="number" name="backup_interval_days" min="0" step="1" value="${attr(settings.reminders.backup_interval_days ?? "")}">`)}
         </div>
         <div class="button-row">
           <button class="btn primary" type="submit">Erinnerungen speichern</button>
-          <button class="btn ghost" type="button" data-action="mark-height">GrÃ¶sse bestÃ¤tigt</button>
+          <button class="btn ghost" type="button" data-action="mark-height">Grösse bestätigt</button>
           <button class="btn ghost" type="button" data-action="mark-backup">Backup erledigt</button>
         </div>
       </form>
@@ -939,15 +940,15 @@ function renderMore() {
       <div class="section-head">
         <div>
           <h2>Daten</h2>
-          <p class="section-note">VollstÃ¤ndiger JSON-Export und Import.</p>
+          <p class="section-note">Vollständiger JSON-Export und Import.</p>
         </div>
       </div>
       <div class="grid auto">
-        ${renderMetric("Gewicht", fmt(data.weight_entries.length, 0), "EintrÃ¤ge")}
-        ${renderMetric("Kalorien", fmt(data.food_entries.length, 0), "EintrÃ¤ge")}
+        ${renderMetric("Gewicht", fmt(data.weight_entries.length, 0), "Einträge")}
+        ${renderMetric("Kalorien", fmt(data.food_entries.length, 0), "Einträge")}
         ${renderMetric("Food-Presets", fmt(data.food_presets.length, 0), "gespeichert")}
-        ${renderMetric("Trainings", fmt(data.workouts.length, 0), "EintrÃ¤ge")}
-        ${renderMetric("Ãœbungen", fmt(data.exercise_presets.length, 0), "Presets")}
+        ${renderMetric("Trainings", fmt(data.workouts.length, 0), "Einträge")}
+        ${renderMetric("Übungen", fmt(data.exercise_presets.length, 0), "Presets")}
       </div>
       <div class="button-row" style="margin-top: 14px;">
         <button class="btn primary" type="button" data-action="export-json">JSON exportieren</button>
@@ -957,7 +958,7 @@ function renderMore() {
           ${field("Import-Datei", `<input type="file" name="import_file" accept="application/json" required>`)}
           ${field("Modus", `
             <select name="import_mode">
-              <option value="merge">ZusammenfÃ¼hren</option>
+              <option value="merge">Zusammenführen</option>
               <option value="replace">Alles ersetzen</option>
               <option value="presets">Nur Presets importieren</option>
             </select>
@@ -987,7 +988,7 @@ async function handleActionClick(event) {
     }
 
     if (action === "delete-weight") {
-      await confirmDelete("Gewichtseintrag lÃ¶schen?", async () => deleteItem("weight_entries", button.dataset.id));
+      await confirmDelete("Gewichtseintrag löschen?", async () => deleteItem("weight_entries", button.dataset.id));
     }
 
     if (action === "set-calorie-panel") {
@@ -1023,11 +1024,11 @@ async function handleActionClick(event) {
     }
 
     if (action === "delete-food") {
-      await confirmDelete("Kalorieneintrag lÃ¶schen?", async () => deleteItem("food_entries", button.dataset.id));
+      await confirmDelete("Kalorieneintrag löschen?", async () => deleteItem("food_entries", button.dataset.id));
     }
 
     if (action === "delete-food-preset") {
-      await confirmDelete("Preset lÃ¶schen?", async () => {
+      await confirmDelete("Preset löschen?", async () => {
         await deleteItem("food_presets", button.dataset.id);
         if (state.foodPresetEditId === button.dataset.id) state.foodPresetEditId = null;
       });
@@ -1068,11 +1069,11 @@ async function handleActionClick(event) {
     }
 
     if (action === "delete-workout") {
-      await confirmDelete("Training lÃ¶schen?", async () => deleteItem("workouts", button.dataset.id));
+      await confirmDelete("Training löschen?", async () => deleteItem("workouts", button.dataset.id));
     }
 
     if (action === "delete-exercise-preset") {
-      await confirmDelete("Ãœbungs-Preset lÃ¶schen?", async () => deleteItem("exercise_presets", button.dataset.id));
+      await confirmDelete("Übungs-Preset löschen?", async () => deleteItem("exercise_presets", button.dataset.id));
     }
 
     if (action === "export-json") {
@@ -1081,12 +1082,12 @@ async function handleActionClick(event) {
 
     if (action === "mark-height") {
       await updateReminderDate("last_height_check_at");
-      showToast("GrÃ¶sse bestÃ¤tigt.");
+      showToast("Grösse bestätigt.");
     }
 
     if (action === "mark-backup") {
       await updateReminderDate("last_backup_at");
-      showToast("Backup-Erinnerung zurÃ¼ckgesetzt.");
+      showToast("Backup-Erinnerung zurückgesetzt.");
     }
   } catch (error) {
     showToast(error.message || "Aktion fehlgeschlagen.");
@@ -1147,7 +1148,7 @@ async function handleChange(event) {
       updatePresetPreview();
     }
   } catch (error) {
-    showToast(error.message || "Ã„nderung fehlgeschlagen.");
+    showToast(error.message || "Änderung fehlgeschlagen.");
     await render();
   }
 }
@@ -1183,7 +1184,7 @@ async function saveWeightEntry(form) {
     weight_kg: weight,
     waist_cm: optionalPositiveNumber(form, "waist_cm", "Bauchumfang muss sinnvoll sein."),
     neck_cm: optionalPositiveNumber(form, "neck_cm", "Halsumfang muss sinnvoll sein."),
-    hip_cm: optionalPositiveNumber(form, "hip_cm", "HÃ¼ftumfang muss sinnvoll sein."),
+    hip_cm: optionalPositiveNumber(form, "hip_cm", "Hüftumfang muss sinnvoll sein."),
     notes: formValue(form, "notes"),
     created_at: existing?.created_at || now,
     updated_at: now,
@@ -1238,7 +1239,7 @@ async function saveQuickFood(form) {
 async function saveFoodFromPreset(form) {
   const presetId = formValue(form, "preset_id");
   const preset = data.food_presets.find((item) => item.id === presetId);
-  if (!preset) throw new Error("Bitte Preset wÃ¤hlen.");
+  if (!preset) throw new Error("Bitte Preset wählen.");
 
   const quantity = requiredPositiveNumber(form, "quantity", "Bitte Menge eintragen.");
   const factor = quantity / (toNumber(preset.base_quantity) || 1);
@@ -1279,11 +1280,11 @@ async function saveFoodPreset(form) {
     type: formValue(form, "type"),
     unit: formValue(form, "unit"),
     base_quantity: requiredPositiveNumber(form, "base_quantity", "Bitte Basis-Menge eintragen."),
-    calories_kcal: nonNegativeNumber(form, "calories_kcal", "Kalorien dÃ¼rfen nicht negativ sein."),
+    calories_kcal: nonNegativeNumber(form, "calories_kcal", "Kalorien dürfen nicht negativ sein."),
     protein_g: nonNegativeNumber(form, "protein_g", "Protein darf nicht negativ sein."),
-    carbs_g: nonNegativeNumber(form, "carbs_g", "KH dÃ¼rfen nicht negativ sein."),
+    carbs_g: nonNegativeNumber(form, "carbs_g", "KH dürfen nicht negativ sein."),
     fat_g: nonNegativeNumber(form, "fat_g", "Fett darf nicht negativ sein."),
-    fiber_g: optionalNonNegativeNumber(form, "fiber_g", "Ballaststoffe dÃ¼rfen nicht negativ sein."),
+    fiber_g: optionalNonNegativeNumber(form, "fiber_g", "Ballaststoffe dürfen nicht negativ sein."),
     sugar_g: optionalNonNegativeNumber(form, "sugar_g", "Zucker darf nicht negativ sein."),
     salt_g: optionalNonNegativeNumber(form, "salt_g", "Salz darf nicht negativ sein."),
     tags: splitTags(formValue(form, "tags")),
@@ -1318,7 +1319,7 @@ async function saveStrengthWorkout(form) {
     }))
     .filter((exercise) => exercise.name && exercise.sets.length);
 
-  if (!exercises.length) throw new Error("Bitte mindestens eine Ãœbung mit Set eintragen.");
+  if (!exercises.length) throw new Error("Bitte mindestens eine Übung mit Set eintragen.");
 
   const now = toLocalIso();
   await putItem("workouts", {
@@ -1389,7 +1390,7 @@ async function saveOtherWorkout(form) {
 
 async function saveExercisePreset(form) {
   const name = formValue(form, "name");
-  if (!name) throw new Error("Bitte Ãœbungsname eintragen.");
+  if (!name) throw new Error("Bitte Übungsname eintragen.");
 
   const now = toLocalIso();
   await putItem("exercise_presets", {
@@ -1403,13 +1404,13 @@ async function saveExercisePreset(form) {
     updated_at: now,
   });
 
-  showToast("Ãœbungs-Preset gespeichert.");
+  showToast("Übungs-Preset gespeichert.");
   await render();
 }
 
 async function saveProfileSettings(form) {
   const settings = structuredClone(data.settings);
-  settings.profile.height_cm = optionalPositiveNumber(form, "height_cm", "KÃ¶rpergrÃ¶sse muss > 0 sein.");
+  settings.profile.height_cm = optionalPositiveNumber(form, "height_cm", "Körpergrösse muss > 0 sein.");
   settings.profile.birth_date = formValue(form, "birth_date");
   settings.profile.sex = normalizeSex(formValue(form, "sex"));
   await saveSettings(settings);
@@ -1420,7 +1421,7 @@ async function saveProfileSettings(form) {
 async function saveGoalSettings(form) {
   const settings = structuredClone(data.settings);
   for (const key of Object.keys(settings.goals)) {
-    settings.goals[key] = optionalNonNegativeNumber(form, key, "Ziele dÃ¼rfen nicht negativ sein.");
+    settings.goals[key] = optionalNonNegativeNumber(form, key, "Ziele dürfen nicht negativ sein.");
   }
   delete settings.goals.training_days_goal_per_week;
   await saveSettings(settings);
@@ -1442,7 +1443,7 @@ async function saveMaintenanceSettings(form) {
   settings.maintenance.min_kcal = optionalNonNegativeNumber(form, "min_kcal", "Maintenance darf nicht negativ sein.");
   settings.maintenance.max_kcal = optionalNonNegativeNumber(form, "max_kcal", "Maintenance darf nicht negativ sein.");
   if (settings.maintenance.max_kcal && settings.maintenance.min_kcal && settings.maintenance.max_kcal < settings.maintenance.min_kcal) {
-    throw new Error("Maximum muss Ã¼ber Minimum liegen.");
+    throw new Error("Maximum muss über Minimum liegen.");
   }
   await saveSettings(settings);
   showToast("Maintenance gespeichert.");
@@ -1461,7 +1462,7 @@ async function saveReminderSettings(form) {
 async function importData(form) {
   const file = form.elements.namedItem("import_file")?.files?.[0];
   const mode = formValue(form, "import_mode");
-  if (!file) throw new Error("Bitte Import-Datei wÃ¤hlen.");
+  if (!file) throw new Error("Bitte Import-Datei wählen.");
 
   const parsed = await readJsonFile(file);
 
@@ -1476,7 +1477,7 @@ async function importData(form) {
     showToast("Presets importiert.");
   } else {
     await mergeImportData(parsed);
-    showToast("Daten zusammengefÃ¼hrt.");
+    showToast("Daten zusammengeführt.");
   }
 
   await render();
@@ -1499,7 +1500,7 @@ async function updateReminderDate(key, rerender = true) {
 async function copyYesterdayFoods() {
   const yesterday = formatDateKey(addDays(parseDateKey(state.selectedDate), -1));
   const rows = data.food_entries.filter((entry) => entry.date === yesterday);
-  if (!rows.length) throw new Error("Gestern keine EintrÃ¤ge gefunden.");
+  if (!rows.length) throw new Error("Gestern keine Einträge gefunden.");
 
   const now = toLocalIso();
   for (const row of rows) {
@@ -1519,7 +1520,7 @@ async function copyYesterdayFoods() {
 async function confirmDelete(message, action) {
   if (!confirm(message)) return;
   await action();
-  showToast("GelÃ¶scht.");
+  showToast("Gelöscht.");
   await render();
 }
 
@@ -1536,7 +1537,7 @@ function renderReminderBanner() {
         </div>
       </div>
       <div class="button-row">
-        ${reminders.some((item) => item.includes("KÃ¶rpergrÃ¶sse")) ? `<button class="btn small ghost" type="button" data-action="mark-height">GrÃ¶sse bestÃ¤tigt</button>` : ""}
+        ${reminders.some((item) => item.includes("Körpergrösse")) ? `<button class="btn small ghost" type="button" data-action="mark-height">Grösse bestätigt</button>` : ""}
         ${reminders.some((item) => item.includes("Backup")) ? `<button class="btn small primary" type="button" data-action="export-json">Backup jetzt</button>` : ""}
       </div>
     </section>
@@ -1548,11 +1549,11 @@ function dueReminders() {
   const result = [];
 
   if (isReminderDue(reminders.last_height_check_at, reminders.height_check_interval_days)) {
-    result.push("KÃ¶rpergrÃ¶sse wieder einmal prÃ¼fen oder bestÃ¤tigen.");
+    result.push("Körpergrösse wieder einmal prüfen oder bestätigen.");
   }
 
   if (isReminderDue(reminders.last_backup_at, reminders.backup_interval_days)) {
-    result.push("Backup ist fÃ¤llig.");
+    result.push("Backup ist fällig.");
   }
 
   return result;
@@ -1669,7 +1670,7 @@ function buildChatGptDailyContext() {
     },
     instructions: {
       preferred_response_language: "de-CH",
-      task: "Hilf mir, den Rest des Tages bezÃ¼glich Kalorien, Protein und Training sinnvoll zu planen. Sei direkt und praktisch. BerÃ¼cksichtige, was heute bereits gegessen und trainiert wurde. Gib konkrete VorschlÃ¤ge fÃ¼r Mahlzeiten, Snack-Optionen und PrioritÃ¤ten.",
+      task: "Hilf mir, den Rest des Tages bezüglich Kalorien, Protein und Training sinnvoll zu planen. Sei direkt und praktisch. Berücksichtige, was heute bereits gegessen und trainiert wurde. Gib konkrete Vorschläge für Mahlzeiten, Snack-Optionen und Prioritäten.",
     },
   };
 }
@@ -1694,13 +1695,13 @@ async function copyChatGptDailyContextToClipboard() {
     showChatGptCopiedDialog(copiedAs);
   } catch (error) {
     downloadJson(context, `fittrack-chatgpt-context-${context.date}.json`);
-    showToast("Zwischenablage nicht verfÃ¼gbar. JSON wurde heruntergeladen.");
+    showToast("Zwischenablage nicht verfügbar. JSON wurde heruntergeladen.");
   }
 }
 
 async function copyJsonBlobToClipboard(json) {
   if (!navigator.clipboard || !window.ClipboardItem) {
-    throw new Error("ClipboardItem nicht unterstÃ¼tzt.");
+    throw new Error("ClipboardItem nicht unterstützt.");
   }
 
   const item = new ClipboardItem({
@@ -1714,7 +1715,7 @@ async function copyJsonBlobToClipboard(json) {
 
 async function writeTextToClipboard(text) {
   if (!navigator.clipboard?.writeText) {
-    throw new Error("Zwischenablage nicht verfÃ¼gbar.");
+    throw new Error("Zwischenablage nicht verfügbar.");
   }
 
   await navigator.clipboard.writeText(text);
@@ -1724,7 +1725,7 @@ function showChatGptCopiedDialog(copiedAs) {
   document.querySelector("#chatgpt-copy-dialog")?.remove();
 
   const formatText = copiedAs === "json"
-    ? "Der Kontext wurde als JSON in die Zwischenablage kopiert. Falls ChatGPT ihn nicht als Datei erkennt, kannst du ihn als Text einfÃ¼gen."
+    ? "Der Kontext wurde als JSON in die Zwischenablage kopiert. Falls ChatGPT ihn nicht als Datei erkennt, kannst du ihn als Text einfügen."
     : "Der Kontext wurde als JSON-Text in die Zwischenablage kopiert.";
 
   const dialog = document.createElement("div");
@@ -1734,9 +1735,9 @@ function showChatGptCopiedDialog(copiedAs) {
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="chatgpt-copy-title">
       <h2 id="chatgpt-copy-title">Heute in Zwischenablage kopiert</h2>
       <p>${safe(formatText)}</p>
-      <p class="section-note">Ã–ffne ChatGPT und fÃ¼ge den Kontext in einen neuen Chat ein. Der Kontext enthÃ¤lt persÃ¶nliche Trackingdaten.</p>
+      <p class="section-note">Öffne ChatGPT und füge den Kontext in einen neuen Chat ein. Der Kontext enthält persönliche Trackingdaten.</p>
       <div class="button-row">
-        <button class="btn primary" type="button" data-action="open-chatgpt">ChatGPT Ã¶ffnen</button>
+        <button class="btn primary" type="button" data-action="open-chatgpt">ChatGPT öffnen</button>
         <button class="btn ghost" type="button" data-dialog-close>Schliessen</button>
       </div>
     </div>
@@ -1915,22 +1916,22 @@ function diffSince(entries, endDate, days) {
 
 function highestWeekText(stats) {
   if (!stats.highestWeeklyAverage || stats.diffHighestWeeklyAverage === null) {
-    return "Noch nicht genug Wochenwerte fÃ¼r eine Trendzeile.";
+    return "Noch nicht genug Wochenwerte für eine Trendzeile.";
   }
 
   const diff = stats.diffHighestWeeklyAverage;
   if (diff < 0) {
-    return `Du bist aktuell ${fmt(Math.abs(diff), 1)} kg unter deinem hÃ¶chsten Wochenmittel.`;
+    return `Du bist aktuell ${fmt(Math.abs(diff), 1)} kg unter deinem höchsten Wochenmittel.`;
   }
   if (diff > 0) {
-    return `Du bist aktuell ${fmt(diff, 1)} kg Ã¼ber deinem hÃ¶chsten Wochenmittel.`;
+    return `Du bist aktuell ${fmt(diff, 1)} kg über deinem höchsten Wochenmittel.`;
   }
-  return "Du bist aktuell genau auf deinem hÃ¶chsten Wochenmittel.";
+  return "Du bist aktuell genau auf deinem höchsten Wochenmittel.";
 }
 
 function bodyFatMissingText() {
   const sex = data.settings.profile.sex;
-  if (sex === "female") return "Bauch, Hals und HÃ¼fte erfassen.";
+  if (sex === "female") return "Bauch, Hals und Hüfte erfassen.";
   return "Bauch- und Halsumfang erfassen.";
 }
 
@@ -1940,19 +1941,19 @@ function normalizeSex(sex) {
 
 function renderWeightHistory() {
   const entries = [...data.weight_entries].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  if (!entries.length) return `<div class="empty">Noch keine GewichtseintrÃ¤ge.</div>`;
+  if (!entries.length) return `<div class="empty">Noch keine Gewichtseinträge.</div>`;
 
   return `
     <div class="list">
       ${entries.map((entry) => `
         <div class="list-row">
           <div>
-            <p class="list-row-title">${formatDate(entry.date)} Â· ${fmt(entry.weight_kg, 1)} kg</p>
-            <p class="list-row-meta">${measurementSummary(entry)}${entry.notes ? ` Â· ${safe(entry.notes)}` : ""}</p>
+            <p class="list-row-title">${formatDate(entry.date)} · ${fmt(entry.weight_kg, 1)} kg</p>
+            <p class="list-row-meta">${measurementSummary(entry)}${entry.notes ? ` · ${safe(entry.notes)}` : ""}</p>
           </div>
           <div class="list-actions">
             <button class="btn small ghost" type="button" data-action="edit-weight" data-id="${attr(entry.id)}">Bearbeiten</button>
-            <button class="btn small danger" type="button" data-action="delete-weight" data-id="${attr(entry.id)}">LÃ¶schen</button>
+            <button class="btn small danger" type="button" data-action="delete-weight" data-id="${attr(entry.id)}">Löschen</button>
           </div>
         </div>
       `).join("")}
@@ -2005,7 +2006,7 @@ function renderPresetEntryForm() {
       <div class="form-grid">
         ${field("Preset", `
           <select id="preset-select" name="preset_id" required>
-            ${data.food_presets.map((preset) => `<option value="${attr(preset.id)}">${safe(preset.name)} Â· ${presetTypeLabel(preset)}</option>`).join("")}
+            ${data.food_presets.map((preset) => `<option value="${attr(preset.id)}">${safe(preset.name)} · ${presetTypeLabel(preset)}</option>`).join("")}
           </select>
         `)}
         ${field("Menge", `<input id="preset-quantity" type="number" name="quantity" min="0.01" step="0.01" value="1" required>`)}
@@ -2050,7 +2051,7 @@ function renderFoodPresetForm() {
 
 function renderFoodEntriesForDate(date) {
   const rows = data.food_entries.filter((entry) => entry.date === date);
-  if (!rows.length) return `<div class="empty">Noch keine KalorieneintrÃ¤ge fÃ¼r diesen Tag.</div>`;
+  if (!rows.length) return `<div class="empty">Noch keine Kalorieneinträge für diesen Tag.</div>`;
 
   return `
     <div class="screen-stack">
@@ -2064,11 +2065,11 @@ function renderFoodEntriesForDate(date) {
               ${entries.map((entry) => `
                 <div class="list-row">
                   <div>
-                    <p class="list-row-title">${safe(entry.name)} Â· ${fmt(entry.calories_kcal, 0)} kcal</p>
-                    <p class="list-row-meta">${fmt(entry.protein_g, 1)}g Protein Â· ${fmt(entry.carbs_g, 1)}g KH Â· ${fmt(entry.fat_g, 1)}g Fett${entry.notes ? ` Â· ${safe(entry.notes)}` : ""}</p>
+                    <p class="list-row-title">${safe(entry.name)} · ${fmt(entry.calories_kcal, 0)} kcal</p>
+                    <p class="list-row-meta">${fmt(entry.protein_g, 1)}g Protein · ${fmt(entry.carbs_g, 1)}g KH · ${fmt(entry.fat_g, 1)}g Fett${entry.notes ? ` · ${safe(entry.notes)}` : ""}</p>
                   </div>
                   <div class="list-actions">
-                    <button class="btn small danger" type="button" data-action="delete-food" data-id="${attr(entry.id)}">LÃ¶schen</button>
+                    <button class="btn small danger" type="button" data-action="delete-food" data-id="${attr(entry.id)}">Löschen</button>
                   </div>
                 </div>
               `).join("")}
@@ -2089,11 +2090,11 @@ function renderFoodPresetList() {
         <div class="list-row">
           <div>
             <p class="list-row-title">${safe(preset.name)}</p>
-            <p class="list-row-meta">${presetTypeLabel(preset)} Â· ${fmt(preset.calories_kcal, 0)} kcal Â· ${fmt(preset.protein_g, 1)}g Protein Â· ${fmt(preset.carbs_g, 1)}g KH Â· ${fmt(preset.fat_g, 1)}g Fett${preset.tags?.length ? ` Â· ${preset.tags.map(safe).join(", ")}` : ""}</p>
+            <p class="list-row-meta">${presetTypeLabel(preset)} · ${fmt(preset.calories_kcal, 0)} kcal · ${fmt(preset.protein_g, 1)}g Protein · ${fmt(preset.carbs_g, 1)}g KH · ${fmt(preset.fat_g, 1)}g Fett${preset.tags?.length ? ` · ${preset.tags.map(safe).join(", ")}` : ""}</p>
           </div>
           <div class="list-actions">
             <button class="btn small ghost" type="button" data-action="edit-food-preset" data-id="${attr(preset.id)}">Bearbeiten</button>
-            <button class="btn small danger" type="button" data-action="delete-food-preset" data-id="${attr(preset.id)}">LÃ¶schen</button>
+            <button class="btn small danger" type="button" data-action="delete-food-preset" data-id="${attr(preset.id)}">Löschen</button>
           </div>
         </div>
       `).join("")}
@@ -2108,33 +2109,33 @@ function renderStrengthWorkoutForm() {
     <div class="screen-stack">
       <div class="training-exercise-picker">
         <div>
-          <h3>Ãœbung hinzufÃ¼gen</h3>
-          <p class="section-note">Preset wÃ¤hlen oder direkt einen Namen eintragen.</p>
+          <h3>Übung hinzufügen</h3>
+          <p class="section-note">Preset wählen oder direkt einen Namen eintragen.</p>
         </div>
         <div class="form-grid">
           ${field("Aus Preset", `
             <select id="draft-exercise-preset">
-              <option value="">Preset wÃ¤hlen</option>
+              <option value="">Preset wählen</option>
               ${data.exercise_presets.map((exercise) => `<option value="${attr(exercise.id)}">${safe(exercise.name)}</option>`).join("")}
             </select>
           `)}
-          ${field("Oder Name", `<input id="draft-exercise-name" placeholder="z.B. BankdrÃ¼cken">`)}
+          ${field("Oder Name", `<input id="draft-exercise-name" placeholder="z.B. Bankdrücken">`)}
         </div>
         <div class="button-row" style="margin-top: 12px;">
-          <button class="btn" type="button" data-action="add-draft-exercise">Ãœbung hinzufÃ¼gen</button>
+          <button class="btn" type="button" data-action="add-draft-exercise">Übung hinzufügen</button>
         </div>
       </div>
 
       <form id="strength-workout-form">
         <div class="form-grid">
           ${field("Datum", `<input type="date" name="date" value="${attr(todayKey())}" required>`)}
-          ${field("Name", `<input name="name" value="GanzkÃ¶rper">`)}
+          ${field("Name", `<input name="name" value="Ganzkörper">`)}
           ${field("Dauer Minuten", `<input type="number" name="duration_min" min="0" step="1">`)}
           ${field("Notiz", `<textarea name="notes"></textarea>`, "full")}
         </div>
         <div class="pill-row training-summary-pills" aria-label="Krafttraining Entwurf">
-          <span class="pill"><span data-strength-stat="exercises">${fmt(stats.exercises, 0)}</span> Ãœbungen</span>
-          <span class="pill"><span data-strength-stat="sets">${fmt(stats.sets, 0)}</span> SÃ¤tze</span>
+          <span class="pill"><span data-strength-stat="exercises">${fmt(stats.exercises, 0)}</span> Übungen</span>
+          <span class="pill"><span data-strength-stat="sets">${fmt(stats.sets, 0)}</span> Sätze</span>
           <span class="pill"><span data-strength-stat="volume">${fmt(stats.volume, 0)}</span> kg Volumen</span>
         </div>
         ${renderStrengthDraft()}
@@ -2160,7 +2161,7 @@ function strengthDraftStats() {
 
 function renderStrengthDraft() {
   if (!state.strengthDraft.length) {
-    return `<div class="empty">Noch keine Ãœbung im Training. FÃ¼ge zuerst eine Ãœbung hinzu, dann die SÃ¤tze.</div>`;
+    return `<div class="empty">Noch keine Übung im Training. Füge zuerst eine Übung hinzu, dann die Sätze.</div>`;
   }
 
   return `
@@ -2168,11 +2169,11 @@ function renderStrengthDraft() {
       ${state.strengthDraft.map((exercise, exerciseIndex) => `
         <div class="draft-exercise" data-exercise-index="${exerciseIndex}">
           <div class="exercise-head">
-            ${field("Ãœbung", `<input name="exercise_name" value="${attr(exercise.name)}">`)}
+            ${field("Übung", `<input name="exercise_name" value="${attr(exercise.name)}">`)}
             <button class="btn small danger" type="button" data-action="remove-draft-exercise" data-target-exercise-index="${exerciseIndex}">Entfernen</button>
           </div>
           <input type="hidden" name="exercise_id" value="${attr(exercise.exercise_id || "")}">
-          <div class="set-list" role="group" aria-label="SÃ¤tze">
+          <div class="set-list" role="group" aria-label="Sätze">
             <div class="set-row set-row-head" aria-hidden="true">
               <span>Set</span>
               <span>Gewicht</span>
@@ -2190,12 +2191,12 @@ function renderStrengthDraft() {
                   <span>Wdh.</span>
                   <input name="set_reps" type="number" min="0" step="1" value="${attr(set.reps ?? "")}">
                 </label>
-                <button class="btn small danger" type="button" data-action="remove-draft-set" data-target-exercise-index="${exerciseIndex}" data-target-set-index="${setIndex}">LÃ¶schen</button>
+                <button class="btn small danger" type="button" data-action="remove-draft-set" data-target-exercise-index="${exerciseIndex}" data-target-set-index="${setIndex}">Löschen</button>
               </div>
             `).join("")}
           </div>
           <div class="button-row">
-            <button class="btn small ghost" type="button" data-action="add-draft-set" data-target-exercise-index="${exerciseIndex}">Set hinzufÃ¼gen</button>
+            <button class="btn small ghost" type="button" data-action="add-draft-set" data-target-exercise-index="${exerciseIndex}">Set hinzufügen</button>
           </div>
         </div>
       `).join("")}
@@ -2248,13 +2249,13 @@ function renderExercisePresetForm() {
         `)}
         ${field("Notiz", `<textarea name="notes"></textarea>`, "full")}
       </div>
-      <button class="btn primary" type="submit">Ãœbungs-Preset speichern</button>
+      <button class="btn primary" type="submit">Übungs-Preset speichern</button>
     </form>
   `;
 }
 
 function renderExercisePresetList() {
-  if (!data.exercise_presets.length) return `<div class="empty">Noch keine Ãœbungs-Presets.</div>`;
+  if (!data.exercise_presets.length) return `<div class="empty">Noch keine Übungs-Presets.</div>`;
 
   return `
     <div class="list">
@@ -2262,10 +2263,10 @@ function renderExercisePresetList() {
         <div class="list-row">
           <div>
             <p class="list-row-title">${safe(exercise.name)}</p>
-            <p class="list-row-meta">${safe(exercise.category || "Kraft")} Â· ${(exercise.muscle_groups || []).map(safe).join(", ") || "keine Muskelgruppen"}</p>
+            <p class="list-row-meta">${safe(exercise.category || "Kraft")} · ${(exercise.muscle_groups || []).map(safe).join(", ") || "keine Muskelgruppen"}</p>
           </div>
           <div class="list-actions">
-            <button class="btn small danger" type="button" data-action="delete-exercise-preset" data-id="${attr(exercise.id)}">LÃ¶schen</button>
+            <button class="btn small danger" type="button" data-action="delete-exercise-preset" data-id="${attr(exercise.id)}">Löschen</button>
           </div>
         </div>
       `).join("")}
@@ -2282,11 +2283,11 @@ function renderWorkoutList() {
       ${rows.map((workout) => `
         <div class="list-row">
           <div>
-            <p class="list-row-title">${formatDate(workout.date)} Â· ${safe(workout.name || workoutTypeLabel(workout.type))}</p>
+            <p class="list-row-title">${formatDate(workout.date)} · ${safe(workout.name || workoutTypeLabel(workout.type))}</p>
             <p class="list-row-meta">${workoutSummary(workout)}</p>
           </div>
           <div class="list-actions">
-            <button class="btn small danger" type="button" data-action="delete-workout" data-id="${attr(workout.id)}">LÃ¶schen</button>
+            <button class="btn small danger" type="button" data-action="delete-workout" data-id="${attr(workout.id)}">Löschen</button>
           </div>
         </div>
       `).join("")}
@@ -2344,7 +2345,7 @@ function addDraftExerciseFromForm() {
   const name = preset?.name || manualName;
 
   if (!name) {
-    showToast("Bitte Ãœbung wÃ¤hlen oder Namen eintragen.");
+    showToast("Bitte Übung wählen oder Namen eintragen.");
     return;
   }
 
@@ -2557,7 +2558,7 @@ function applyPresetTypeDefaults(type) {
     unit.value = "g";
     base.value = "100";
   } else {
-    unit.value = "StÃ¼ck";
+    unit.value = "Stück";
     base.value = "1";
   }
 }
@@ -2566,11 +2567,11 @@ function buildFoodEntryFromForm(form, base) {
   const now = toLocalIso();
   return {
     ...base,
-    calories_kcal: nonNegativeNumber(form, "calories_kcal", "Kalorien dÃ¼rfen nicht negativ sein."),
+    calories_kcal: nonNegativeNumber(form, "calories_kcal", "Kalorien dürfen nicht negativ sein."),
     protein_g: nonNegativeNumber(form, "protein_g", "Protein darf nicht negativ sein."),
-    carbs_g: nonNegativeNumber(form, "carbs_g", "KH dÃ¼rfen nicht negativ sein."),
+    carbs_g: nonNegativeNumber(form, "carbs_g", "KH dürfen nicht negativ sein."),
     fat_g: nonNegativeNumber(form, "fat_g", "Fett darf nicht negativ sein."),
-    fiber_g: optionalNonNegativeNumber(form, "fiber_g", "Ballaststoffe dÃ¼rfen nicht negativ sein."),
+    fiber_g: optionalNonNegativeNumber(form, "fiber_g", "Ballaststoffe dürfen nicht negativ sein."),
     sugar_g: optionalNonNegativeNumber(form, "sugar_g", "Zucker darf nicht negativ sein."),
     salt_g: optionalNonNegativeNumber(form, "salt_g", "Salz darf nicht negativ sein."),
     notes: formValue(form, "notes"),
@@ -2586,7 +2587,7 @@ function buildPresetFromValues(values) {
     type: values.type || "unit_item",
     name: values.name,
     base_quantity: values.base_quantity || (values.type === "ingredient_100g" ? 100 : 1),
-    unit: values.unit || (values.type === "ingredient_100g" ? "g" : "StÃ¼ck"),
+    unit: values.unit || (values.type === "ingredient_100g" ? "g" : "Stück"),
     calories_kcal: values.calories_kcal,
     protein_g: values.protein_g,
     carbs_g: values.carbs_g,
@@ -2633,9 +2634,9 @@ function renderProgressRow(label, current, goal, unit, options = {}) {
       <div class="kpi-row">
         <div class="kpi-main">
           <p class="kpi-title">${safe(label)}</p>
-          <p class="kpi-sub">${goalValue ? `${fmt(currentValue, 0)} ${safe(unit)} / ${fmt(goalValue, 0)} ${safe(unit)}` : `${fmt(currentValue, 0)} ${safe(unit)} Â· kein Ziel gesetzt`}</p>
+          <p class="kpi-sub">${goalValue ? `${fmt(currentValue, 0)} ${safe(unit)} / ${fmt(goalValue, 0)} ${safe(unit)}` : `${fmt(currentValue, 0)} ${safe(unit)} · kein Ziel gesetzt`}</p>
         </div>
-        <div class="kpi-value">${goalValue ? `${fmt(progress, 0)}%` : "â€“"}</div>
+        <div class="kpi-value">${goalValue ? `${fmt(progress, 0)}%` : "–"}</div>
       </div>
       <div class="progress ${progressClass}" style="--value: ${goalValue ? Math.min(progress, 120) : 0}%"><span></span></div>
     </div>
@@ -2734,9 +2735,9 @@ function renderTrainingGoalCard(label, current, goal) {
       <div class="kpi-row">
         <div class="kpi-main">
           <p class="kpi-title">${safe(label)} diese Woche</p>
-          <p class="kpi-sub">${target ? `${fmt(current, 0)} von ${fmt(target, 0)} Einheiten` : `${fmt(current, 0)} Einheiten Â· kein Ziel gesetzt`}</p>
+          <p class="kpi-sub">${target ? `${fmt(current, 0)} von ${fmt(target, 0)} Einheiten` : `${fmt(current, 0)} Einheiten · kein Ziel gesetzt`}</p>
         </div>
-        <div class="kpi-value">${target ? `${fmt(progress, 0)}%` : "â€“"}</div>
+        <div class="kpi-value">${target ? `${fmt(progress, 0)}%` : "–"}</div>
       </div>
       <div class="progress ok" style="--value: ${progress}%"><span></span></div>
     </article>
@@ -2785,11 +2786,11 @@ function renderSimpleWorkoutList() {
       ${rows.map((workout) => `
         <div class="list-row">
           <div>
-            <p class="list-row-title">${formatDate(workout.date)} Â· ${safe(workoutTypeLabel(workout.type))}</p>
+            <p class="list-row-title">${formatDate(workout.date)} · ${safe(workoutTypeLabel(workout.type))}</p>
             <p class="list-row-meta">Erledigt</p>
           </div>
           <div class="list-actions">
-            <button class="btn small danger" type="button" data-action="delete-workout" data-id="${attr(workout.id)}">LÃ¶schen</button>
+            <button class="btn small danger" type="button" data-action="delete-workout" data-id="${attr(workout.id)}">Löschen</button>
           </div>
         </div>
       `).join("")}
@@ -2838,27 +2839,27 @@ function option(value, label, selected) {
 
 function presetTypeLabel(preset) {
   if (preset.type === "ingredient_100g") return `pro ${fmt(preset.base_quantity, 0)}${preset.unit || "g"}`;
-  return `pro ${fmt(preset.base_quantity, 0)} ${preset.unit || "StÃ¼ck"}`;
+  return `pro ${fmt(preset.base_quantity, 0)} ${preset.unit || "Stück"}`;
 }
 
 function measurementSummary(entry) {
   const parts = [];
   if (entry.waist_cm) parts.push(`Bauch ${fmt(entry.waist_cm, 1)} cm`);
   if (entry.neck_cm) parts.push(`Hals ${fmt(entry.neck_cm, 1)} cm`);
-  if (entry.hip_cm) parts.push(`HÃ¼fte ${fmt(entry.hip_cm, 1)} cm`);
-  return parts.join(" Â· ") || "Keine UmfÃ¤nge";
+  if (entry.hip_cm) parts.push(`Hüfte ${fmt(entry.hip_cm, 1)} cm`);
+  return parts.join(" · ") || "Keine Umfänge";
 }
 
 function workoutSummary(workout) {
   if (workout.type === "strength") {
     const volume = calculateStrengthWorkoutVolume(workout);
     const exerciseCount = workout.exercises?.length || 0;
-    return `Kraft Â· ${exerciseCount} Ãœbungen Â· ${fmt(volume, 0)} kg Volumen${workout.duration_min ? ` Â· ${fmt(workout.duration_min, 0)} min` : ""}`;
+    return `Kraft · ${exerciseCount} Übungen · ${fmt(volume, 0)} kg Volumen${workout.duration_min ? ` · ${fmt(workout.duration_min, 0)} min` : ""}`;
   }
   if (workout.type === "cardio") {
-    return `Cardio Â· ${fmt(workout.duration_min, 0)} min${workout.distance_km ? ` Â· ${fmt(workout.distance_km, 2)} km` : ""}${workout.speed_kmh ? ` Â· ${fmt(workout.speed_kmh, 1)} km/h` : ""}`;
+    return `Cardio · ${fmt(workout.duration_min, 0)} min${workout.distance_km ? ` · ${fmt(workout.distance_km, 2)} km` : ""}${workout.speed_kmh ? ` · ${fmt(workout.speed_kmh, 1)} km/h` : ""}`;
   }
-  return `Sonstiges${workout.duration_min ? ` Â· ${fmt(workout.duration_min, 0)} min` : ""}`;
+  return `Sonstiges${workout.duration_min ? ` · ${fmt(workout.duration_min, 0)} min` : ""}`;
 }
 
 function workoutTypeLabel(type) {
@@ -2870,18 +2871,18 @@ function workoutTypeLabel(type) {
 function calorieBalanceText(calories, goal) {
   const delta = (toNumber(goal) || 0) - (toNumber(calories) || 0);
   if (delta >= 0) return `Noch ${fmt(delta, 0)} kcal offen`;
-  return `${fmt(Math.abs(delta), 0)} kcal Ã¼ber Ziel`;
+  return `${fmt(Math.abs(delta), 0)} kcal über Ziel`;
 }
 
 function maintenanceText(maintenance) {
   if (!maintenance) return "nicht gesetzt";
   if (maintenance.below_min > 0) {
-    return `unter Maintenance: ${fmt(maintenance.below_min, 0)}â€“${fmt(maintenance.below_max, 0)} kcal`;
+    return `unter Maintenance: ${fmt(maintenance.below_min, 0)}–${fmt(maintenance.below_max, 0)} kcal`;
   }
   if (maintenance.max_delta <= 0) {
     return "innerhalb der Range";
   }
-  return `${fmt(maintenance.max_delta, 0)} kcal Ã¼ber Range`;
+  return `${fmt(maintenance.max_delta, 0)} kcal über Range`;
 }
 
 function lastNDays(endDateKey, days) {
@@ -2941,7 +2942,7 @@ function percent(current, goal) {
 
 function fmt(value, digits = 0) {
   const number = toNumber(value);
-  if (number === null) return "â€“";
+  if (number === null) return "–";
   return new Intl.NumberFormat("de-CH", {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
@@ -2956,7 +2957,7 @@ function fmtRaw(value, digits = 0) {
 
 function fmtSigned(value, digits = 0) {
   const number = toNumber(value);
-  if (number === null) return "â€“";
+  if (number === null) return "–";
   const sign = number > 0 ? "+" : "";
   return `${sign}${fmt(number, digits)}`;
 }
@@ -2968,7 +2969,7 @@ function round(value, digits = 1) {
 
 function formatDate(dateKey) {
   const date = parseDateKey(dateKey);
-  if (!date) return "â€“";
+  if (!date) return "–";
   return new Intl.DateTimeFormat("de-CH", {
     day: "2-digit",
     month: "2-digit",

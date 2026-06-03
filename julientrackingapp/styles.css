@@ -244,7 +244,7 @@ h3 {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(178px, 0.42fr);
+  grid-template-columns: minmax(0, 1fr) minmax(330px, 0.54fr);
   gap: clamp(18px, 4vw, 34px);
   align-items: center;
 }
@@ -276,20 +276,34 @@ h3 {
   line-height: 1.42;
 }
 
+.today-orbit-stack {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(138px, 1fr));
+  gap: 14px;
+  justify-self: end;
+  width: min(390px, 100%);
+}
+
 .today-orbit {
   --ring: 0%;
+  --ring-start: var(--accent);
+  --ring-end: var(--accent-3);
   position: relative;
   display: grid;
   place-items: center;
-  width: min(230px, 100%);
+  width: 100%;
   aspect-ratio: 1;
-  justify-self: end;
   border-radius: 50%;
   background:
     radial-gradient(circle at center, var(--surface) 0 56%, transparent 57%),
-    conic-gradient(var(--accent) 0 var(--ring), color-mix(in srgb, var(--accent-3) 50%, var(--surface-3)) var(--ring) 100%);
+    conic-gradient(var(--ring-start) 0 var(--ring), color-mix(in srgb, var(--ring-end) 46%, var(--surface-3)) var(--ring) 100%);
   box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-soft);
   animation: lift-in 420ms ease both;
+}
+
+.protein-orbit {
+  --ring-start: var(--accent-2);
+  --ring-end: var(--accent);
 }
 
 .today-orbit::before {
@@ -319,7 +333,7 @@ h3 {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-top: 20px;
 }
@@ -962,9 +976,13 @@ form > button {
     grid-template-columns: 1fr;
   }
 
-  .today-orbit {
+  .today-orbit-stack {
     justify-self: start;
-    width: min(190px, 72vw);
+    width: min(100%, 360px);
+  }
+
+  .today-orbit {
+    width: 100%;
   }
 
   .section-head,
