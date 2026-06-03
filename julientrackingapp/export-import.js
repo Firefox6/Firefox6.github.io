@@ -1,5 +1,6 @@
 import {
   clearStore,
+  createDataSnapshot,
   getAll,
   getItem,
   getSettings,
@@ -75,6 +76,7 @@ export function validateImportData(data) {
 
 export async function replaceAllData(data) {
   const normalized = normalizeImportData(data);
+  await createDataSnapshot("before-import-replace", await buildExportObject());
 
   await saveSettings(normalized.settings || {});
   const counts = {};

@@ -4,6 +4,7 @@ import {
   getAll,
   getItem,
   getSettings,
+  migrateLegacyLocalStorageData,
   putItem,
   saveSettings,
   todayKey,
@@ -37,6 +38,7 @@ import {
 const app = document.querySelector("#app");
 const screenTitle = document.querySelector("#screen-title");
 const toast = document.querySelector("#toast");
+const updateBanner = document.querySelector("#update-banner");
 const themeColorMeta = document.querySelector("meta[name='theme-color']");
 const LIGHT_THEME_COLOR = "#f7f9f4";
 const DARK_THEME_COLOR = "#111a20";
@@ -73,6 +75,7 @@ const state = {
   caloriePanel: "quick",
   weightEditId: null,
   foodPresetEditId: null,
+  waitingServiceWorker: null,
 };
 
 let data = {
@@ -90,6 +93,10 @@ init();
 
 async function init() {
   bindEvents();
+  const migration = await migrateLegacyLocalStorageData();
+  if (migration.migrated) {
+    showToast("Alte lokale Daten wurden sicher übernommen.");
+  }
   await render();
   registerServiceWorker();
 }
@@ -109,6 +116,14 @@ function bindEvents() {
       await render();
       showToast("Ansicht aktualisiert.");
     }
+  });
+
+  updateBanner?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-update-action='reload']");
+    if (!button || !state.waitingServiceWorker) return;
+    button.disabled = true;
+    button.textContent = "Aktualisiere...";
+    state.waitingServiceWorker.postMessage({ type: "SKIP_WAITING" });
   });
 
   app.addEventListener("click", handleActionClick);
@@ -2934,7 +2949,37 @@ function showToast(message) {
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   if (!["http:", "https:"].includes(location.protocol)) return;
-  navigator.serviceWorker.register("./service-worker.js").catch(() => {
+
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (refreshing) return;
+    refreshing = true;
+    window.location.reload();
+  });
+
+  navigator.serviceWorker.register("./service-worker.js").then((registration) => {
+    if (registration.waiting) {
+      showUpdateBanner(registration.waiting);
+    }
+
+    registration.addEventListener("updatefound", () => {
+      const worker = registration.installing;
+      if (!worker) return;
+
+      worker.addEventListener("statechange", () => {
+        if (worker.state === "installed" && navigator.serviceWorker.controller) {
+          showUpdateBanner(worker);
+        }
+      });
+    });
+  }).catch(() => {
     /* Service Worker ist optional fuer lokale Entwicklung. */
   });
+}
+
+function showUpdateBanner(worker) {
+  state.waitingServiceWorker = worker;
+  if (!updateBanner) return;
+  updateBanner.hidden = false;
+  requestAnimationFrame(() => updateBanner.classList.add("is-visible"));
 }

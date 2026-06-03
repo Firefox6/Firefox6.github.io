@@ -1,7 +1,9 @@
 export const DB_NAME = "julien_tracking_db";
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 
 export const STORE_NAMES = [
+  "meta",
+  "backups",
   "settings",
   "weight_entries",
   "food_entries",
@@ -46,6 +48,15 @@ export const DEFAULT_SETTINGS = {
 };
 
 let dbPromise;
+const DATA_STORES = ["weight_entries", "food_entries", "food_presets", "workouts", "exercise_presets"];
+const LEGACY_LOCAL_STORAGE_KEYS = [
+  "fittrack_data",
+  "fittrack-backup",
+  "fittrack_backup",
+  "julien_tracking_data",
+  "julienTrackingData",
+  DB_NAME,
+];
 
 export function todayKey(date = new Date()) {
   const year = date.getFullYear();
@@ -99,6 +110,14 @@ export function openDB() {
 
     request.onupgradeneeded = () => {
       const db = request.result;
+
+      if (!db.objectStoreNames.contains("meta")) {
+        db.createObjectStore("meta", { keyPath: "id" });
+      }
+
+      if (!db.objectStoreNames.contains("backups")) {
+        db.createObjectStore("backups", { keyPath: "id" });
+      }
 
       if (!db.objectStoreNames.contains("settings")) {
         db.createObjectStore("settings", { keyPath: "id" });
@@ -173,6 +192,67 @@ export async function replaceStore(storeName, rows) {
   await txDone(tx);
 }
 
+export async function getMeta(key) {
+  return getItem("meta", key);
+}
+
+export async function setMeta(key, value) {
+  return putItem("meta", {
+    id: key,
+    value,
+    updated_at: toLocalIso(),
+  });
+}
+
+export async function createDataSnapshot(reason, payload) {
+  const snapshot = {
+    id: `backup_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    reason,
+    created_at: toLocalIso(),
+    schema_version: 2,
+    payload,
+  };
+  await putItem("backups", snapshot);
+  return snapshot;
+}
+
+export async function migrateLegacyLocalStorageData() {
+  if (!globalThis.localStorage) return { migrated: false, reason: "localStorage unavailable" };
+
+  const migrationKey = "legacy_local_storage_migration_v1";
+  const completed = await getMeta(migrationKey);
+  if (completed?.value?.completed) return { migrated: false, reason: "already completed" };
+
+  const legacy = findLegacyLocalStoragePayload();
+  if (!legacy) {
+    await setMeta(migrationKey, { completed: true, migrated: false, reason: "no legacy payload" });
+    return { migrated: false, reason: "no legacy payload" };
+  }
+
+  if (await hasExistingUserData()) {
+    await createDataSnapshot("legacy-local-storage-detected-after-indexeddb-data", legacy);
+    await setMeta(migrationKey, { completed: true, migrated: false, reason: "indexeddb already has data" });
+    return { migrated: false, reason: "indexeddb already has data" };
+  }
+
+  const normalized = normalizeLegacyPayload(legacy.data);
+  await createDataSnapshot("before-legacy-local-storage-migration", legacy);
+  await saveSettings(normalized.settings || {});
+
+  for (const storeName of DATA_STORES) {
+    await replaceStore(storeName, normalized[storeName] || []);
+  }
+
+  await setMeta(migrationKey, {
+    completed: true,
+    migrated: true,
+    source_key: legacy.key,
+    migrated_at: toLocalIso(),
+  });
+
+  return { migrated: true, sourceKey: legacy.key };
+}
+
 export async function getSettings() {
   const stored = await getItem("settings", "settings");
   return mergeSettings(stored?.value || stored || {});
@@ -216,4 +296,74 @@ function deepMerge(base, override) {
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+async function hasExistingUserData() {
+  for (const storeName of DATA_STORES) {
+    const rows = await getAll(storeName);
+    if (rows.length > 0) return true;
+  }
+  return false;
+}
+
+function findLegacyLocalStoragePayload() {
+  for (const key of LEGACY_LOCAL_STORAGE_KEYS) {
+    const raw = safeLocalStorageGet(key);
+    const data = parseLegacyJson(raw);
+    if (data) return { key, raw, data };
+  }
+
+  try {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key || !/fittrack|julien|tracking/i.test(key)) continue;
+      const raw = safeLocalStorageGet(key);
+      const data = parseLegacyJson(raw);
+      if (data) return { key, raw, data };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function safeLocalStorageGet(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function parseLegacyJson(raw) {
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw);
+    return looksLikeTrackingExport(data) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeTrackingExport(data) {
+  if (!data || typeof data !== "object") return false;
+  return ["settings", "weight_entries", "food_entries", "food_presets", "workouts", "exercise_presets"].some(
+    (key) => key in data,
+  );
+}
+
+function normalizeLegacyPayload(data) {
+  return {
+    settings: data.settings || {},
+    weight_entries: asRows(data.weight_entries),
+    food_entries: asRows(data.food_entries),
+    food_presets: asRows(data.food_presets),
+    workouts: asRows(data.workouts),
+    exercise_presets: asRows(data.exercise_presets),
+  };
+}
+
+function asRows(value) {
+  return Array.isArray(value) ? value.filter((row) => row?.id) : [];
 }
