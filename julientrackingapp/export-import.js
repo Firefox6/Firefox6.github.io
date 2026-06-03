@@ -1,5 +1,5 @@
 import {
-  STORE_NAMES,
+  clearStore,
   getAll,
   getItem,
   getSettings,
@@ -10,30 +10,33 @@ import {
   toLocalIso,
 } from "./db.js";
 
-const DATA_STORES = STORE_NAMES.filter((store) => store !== "settings");
+const SCHEMA_VERSION = 2;
+const ACTIVE_DATA_STORES = ["weight_entries", "food_entries", "food_presets", "workouts"];
+const PRESET_STORES = ["food_presets"];
 
 export async function buildExportObject() {
-  const settings = await getSettings();
+  const settings = cleanSettingsForExport(await getSettings());
   const data = {
-    schema_version: 1,
+    schema_version: SCHEMA_VERSION,
     exported_at: toLocalIso(),
     app: {
-      name: "Julien Tracking",
-      version: "1.0.0",
+      name: "FitTrack",
+      version: "2.0.0",
     },
     settings,
   };
 
-  for (const storeName of DATA_STORES) {
-    data[storeName] = await getAll(storeName);
-  }
+  data.weight_entries = await getAll("weight_entries");
+  data.food_entries = await getAll("food_entries");
+  data.food_presets = await getAll("food_presets");
+  data.workouts = normalizeWorkouts(await getAll("workouts"));
 
   return data;
 }
 
 export async function downloadFullExport() {
   const data = await buildExportObject();
-  const filename = `julien-tracking-backup-${todayKey()}.json`;
+  const filename = `fittrack-backup-${todayKey()}.json`;
   downloadJson(data, filename);
   return data;
 }
@@ -62,11 +65,8 @@ export function validateImportData(data) {
     throw new Error("Import-Datei ungültig.");
   }
 
-  if (!data.schema_version) {
-    throw new Error("Import-Datei ungültig.");
-  }
-
-  if (Number(data.schema_version) !== 1) {
+  const version = Number(data.schema_version);
+  if (![1, 2].includes(version)) {
     throw new Error("Schema-Version nicht unterstützt.");
   }
 
@@ -74,35 +74,32 @@ export function validateImportData(data) {
 }
 
 export async function replaceAllData(data) {
-  validateImportData(data);
+  const normalized = normalizeImportData(data);
 
-  await saveSettings(data.settings || {});
+  await saveSettings(normalized.settings || {});
   const counts = {};
 
-  for (const storeName of DATA_STORES) {
-    const rows = Array.isArray(data[storeName]) ? data[storeName] : [];
+  for (const storeName of ACTIVE_DATA_STORES) {
+    const rows = normalized[storeName] || [];
     await replaceStore(storeName, rows);
     counts[storeName] = rows.length;
   }
+  await clearStore("exercise_presets");
 
   return counts;
 }
 
 export async function mergeImportData(data, options = {}) {
-  validateImportData(data);
-
-  const stores = options.presetsOnly
-    ? ["food_presets", "exercise_presets"]
-    : DATA_STORES;
-
+  const normalized = normalizeImportData(data);
+  const stores = options.presetsOnly ? PRESET_STORES : ACTIVE_DATA_STORES;
   const counts = Object.fromEntries(stores.map((store) => [store, 0]));
 
-  if (!options.presetsOnly && data.settings) {
-    await saveSettings(data.settings);
+  if (!options.presetsOnly && normalized.settings) {
+    await saveSettings(normalized.settings);
   }
 
   for (const storeName of stores) {
-    const rows = Array.isArray(data[storeName]) ? data[storeName] : [];
+    const rows = normalized[storeName] || [];
     for (const row of rows) {
       if (!row?.id) continue;
       const existing = await getItem(storeName, row.id);
@@ -114,6 +111,78 @@ export async function mergeImportData(data, options = {}) {
   }
 
   return counts;
+}
+
+function normalizeImportData(data) {
+  validateImportData(data);
+
+  return {
+    schema_version: SCHEMA_VERSION,
+    settings: cleanSettingsForExport(data.settings || {}),
+    weight_entries: asArray(data.weight_entries),
+    food_entries: asArray(data.food_entries),
+    food_presets: asArray(data.food_presets),
+    workouts: normalizeWorkouts(asArray(data.workouts)),
+  };
+}
+
+function cleanSettingsForExport(settings) {
+  const source = settings || {};
+  const goals = source.goals || {};
+  const preferences = source.preferences || {};
+  const cleanGoals = {
+    ...goals,
+    carbs_goal_g: emptyToNull(goals.carbs_goal_g),
+    fat_goal_g: emptyToNull(goals.fat_goal_g),
+    strength_goal_per_week: emptyToNull(goals.strength_goal_per_week),
+    cardio_goal_per_week: emptyToNull(goals.cardio_goal_per_week),
+  };
+  delete cleanGoals.training_days_goal_per_week;
+
+  return {
+    ...source,
+    goals: cleanGoals,
+    preferences: {
+      ...preferences,
+      theme: ["system", "light", "dark"].includes(preferences.theme) ? preferences.theme : "system",
+    },
+  };
+}
+
+function normalizeWorkouts(workouts) {
+  const byDayAndType = new Map();
+
+  for (const workout of workouts || []) {
+    if (!workout?.date || !["strength", "cardio"].includes(workout.type)) continue;
+
+    const key = `${workout.date}_${workout.type}`;
+    const existing = byDayAndType.get(key);
+    const createdAt = workout.created_at || workout.updated_at || toLocalIso();
+    const updatedAt = workout.updated_at || workout.created_at || createdAt;
+    const simpleWorkout = {
+      id: `workout_${workout.date}_${workout.type}`,
+      date: workout.date,
+      type: workout.type,
+      name: workout.type === "strength" ? "Krafttraining" : "Cardio",
+      completed: true,
+      created_at: createdAt,
+      updated_at: updatedAt,
+    };
+
+    if (!existing || isNewer(simpleWorkout, existing)) {
+      byDayAndType.set(key, simpleWorkout);
+    }
+  }
+
+  return [...byDayAndType.values()].sort((a, b) => `${a.date}${a.type}`.localeCompare(`${b.date}${b.type}`));
+}
+
+function emptyToNull(value) {
+  return value === undefined || value === "" ? null : value;
+}
+
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 function isNewer(incoming, existing) {

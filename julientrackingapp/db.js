@@ -19,13 +19,14 @@ export const DEFAULT_SETTINGS = {
   goals: {
     calorie_goal_kcal: 2200,
     protein_goal_g: 150,
-    carbs_goal_g: 220,
-    fat_goal_g: 70,
+    carbs_goal_g: null,
+    fat_goal_g: null,
     fiber_goal_g: null,
     sugar_max_g: null,
     salt_max_g: null,
     weight_goal_kg: 80,
-    training_days_goal_per_week: 3,
+    strength_goal_per_week: null,
+    cardio_goal_per_week: null,
   },
   maintenance: {
     min_kcal: 2400,
@@ -39,7 +40,7 @@ export const DEFAULT_SETTINGS = {
   },
   preferences: {
     units: "metric",
-    theme: "dark",
+    theme: "system",
     dashboard_range_days: 28,
   },
 };
@@ -188,7 +189,13 @@ export async function saveSettings(settings) {
 }
 
 export function mergeSettings(settings) {
-  return deepMerge(DEFAULT_SETTINGS, settings || {});
+  const merged = deepMerge(DEFAULT_SETTINGS, settings || {});
+  merged.profile.sex = merged.profile.sex === "female" ? "female" : "male";
+  merged.preferences.theme = ["system", "light", "dark"].includes(merged.preferences.theme)
+    ? merged.preferences.theme
+    : "system";
+  delete merged.goals.training_days_goal_per_week;
+  return merged;
 }
 
 function deepMerge(base, override) {
