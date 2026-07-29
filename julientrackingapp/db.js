@@ -45,6 +45,20 @@ export const DEFAULT_SETTINGS = {
     theme: "system",
     dashboard_range_days: 28,
   },
+  notifications: {
+    daily_review_enabled: false,
+    weekly_review_enabled: false,
+    focus: {
+      calories: true,
+      protein: true,
+      carbs: false,
+      fat: false,
+      fiber: false,
+      sugar: false,
+      salt: false,
+      training: true,
+    },
+  },
 };
 
 let dbPromise;

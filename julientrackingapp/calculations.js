@@ -32,73 +32,6 @@ export function getBMICategory(bmi) {
   return "Adipositas";
 }
 
-export function calculateNavyBodyFat({ sex, heightCm, waistCm, neckCm, hipCm }) {
-  const height = toNumber(heightCm);
-  const waist = toNumber(waistCm);
-  const neck = toNumber(neckCm);
-  const hip = toNumber(hipCm);
-
-  if (!height || !waist || !neck || height <= 0 || waist <= 0 || neck <= 0) {
-    return null;
-  }
-
-  const cmToInch = 1;
-
-  const heightIn = height * cmToInch;
-  const waistIn = waist * cmToInch;
-  const neckIn = neck * cmToInch;
-  const hipIn = hip ? hip * cmToInch : null;
-
-  function calculateMale() {
-    const abdomenMinusNeck = waistIn - neckIn;
-    if (abdomenMinusNeck <= 0) return null;
-
-    return (
-      495 /
-        (1.0324 -
-          0.19077 * Math.log10(abdomenMinusNeck) +
-          0.15456 * Math.log10(heightIn)) -
-      450
-    );
-  }
-
-  function calculateFemale() {
-    if (!hipIn || hipIn <= 0) return null;
-
-    const waistPlusHipMinusNeck = waistIn + hipIn - neckIn;
-    if (waistPlusHipMinusNeck <= 0) return null;
-
-    return (
-      495 /
-        (1.29579 -
-          0.35004 * Math.log10(waistPlusHipMinusNeck) +
-          0.221 * Math.log10(heightIn)) -
-      450
-    );
-  }
-
-  if (sex === "male") {
-    return calculateMale();
-  }
-
-  if (sex === "female") {
-    return calculateFemale();
-  }
-
-  if (sex === "other") {
-    const male = calculateMale();
-    const female = calculateFemale();
-
-    if (male !== null && female !== null) {
-      return (male + female) / 2;
-    }
-
-    return male ?? female ?? null;
-  }
-
-  return null;
-}
-
 export function calculateDailyNutrition(foodEntries, date) {
   const rows = (foodEntries || []).filter((entry) => entry.date === date);
   const totals = {
@@ -175,16 +108,52 @@ export function calculateMovingAverage(weightEntries, days = 7, endDateKey = nul
   return average(values);
 }
 
-export function calculateStrengthWorkoutVolume(workout) {
-  if (!workout || workout.type !== "strength") return 0;
-  return (workout.exercises || []).reduce((workoutTotal, exercise) => {
-    const exerciseTotal = (exercise.sets || []).reduce((setTotal, set) => {
-      const weight = toNumber(set.weight_kg) || 0;
-      const reps = toNumber(set.reps) || 0;
-      return setTotal + weight * reps;
-    }, 0);
-    return workoutTotal + exerciseTotal;
-  }, 0);
+export function calculateWeightChartSeries(weightEntries) {
+  const entries = (weightEntries || [])
+    .filter((entry) => entry.date && toNumber(entry.weight_kg) !== null)
+    .map((entry) => ({ date: entry.date, weight: toNumber(entry.weight_kg) }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  if (!entries.length) return { points: [], firstDate: null, lastDate: null };
+
+  const firstDate = entries[0].date;
+  const lastDate = entries[entries.length - 1].date;
+  const byDate = new Map(entries.map((entry) => [entry.date, entry.weight]));
+
+  const points = [];
+  let windowStart = 0;
+  let windowEnd = 0;
+  let windowSum = 0;
+  let windowCount = 0;
+
+  let cursor = parseDateKey(firstDate);
+  const end = parseDateKey(lastDate);
+
+  while (cursor <= end) {
+    const dateKey = formatDateKey(cursor);
+    const windowStartKey = formatDateKey(addDays(cursor, -6));
+
+    while (windowEnd < entries.length && entries[windowEnd].date <= dateKey) {
+      windowSum += entries[windowEnd].weight;
+      windowCount += 1;
+      windowEnd += 1;
+    }
+    while (windowStart < windowEnd && entries[windowStart].date < windowStartKey) {
+      windowSum -= entries[windowStart].weight;
+      windowCount -= 1;
+      windowStart += 1;
+    }
+
+    points.push({
+      date: dateKey,
+      raw: byDate.has(dateKey) ? byDate.get(dateKey) : null,
+      avg: windowCount ? windowSum / windowCount : null,
+    });
+
+    cursor = addDays(cursor, 1);
+  }
+
+  return { points, firstDate, lastDate };
 }
 
 export function calculateWeeklyTrainingStats(workouts, referenceDateKey = formatDateKey(new Date())) {
@@ -204,7 +173,6 @@ export function calculateWeeklyTrainingStats(workouts, referenceDateKey = format
         strength: 0,
         cardio: 0,
         other: 0,
-        volume: 0,
       });
     }
 
@@ -212,7 +180,6 @@ export function calculateWeeklyTrainingStats(workouts, referenceDateKey = format
     bucket.total += 1;
     if (workout.type === "strength") {
       bucket.strength += 1;
-      bucket.volume += calculateStrengthWorkoutVolume(workout);
     } else if (workout.type === "cardio") {
       bucket.cardio += 1;
     } else {
@@ -230,7 +197,6 @@ export function calculateWeeklyTrainingStats(workouts, referenceDateKey = format
     strength: 0,
     cardio: 0,
     other: 0,
-    volume: 0,
   };
 
   return {
@@ -252,6 +218,74 @@ export function calculateMaintenanceDelta(calories, minMaintenance, maxMaintenan
     below_min: min - kcal,
     below_max: max - kcal,
   };
+}
+
+export function calculateWeeklyCaloriePool(foodEntries, calorieGoal, referenceDateKey) {
+  const goal = toNumber(calorieGoal);
+  const referenceDate = parseDateKey(referenceDateKey);
+  if (!goal || goal <= 0 || !referenceDate) return { pool: 0, weekStartDate: null };
+
+  const isoDay = referenceDate.getDay() === 0 ? 7 : referenceDate.getDay();
+  const monday = addDays(referenceDate, -(isoDay - 1));
+  const weekStartDate = formatDateKey(monday);
+
+  let pool = 0;
+  let cursor = monday;
+  while (cursor <= referenceDate) {
+    const dateKey = formatDateKey(cursor);
+    const consumed = calculateDailyNutrition(foodEntries, dateKey).calories_kcal;
+    const delta = goal - consumed;
+    pool = delta >= 0 ? pool + Math.min(delta, 250) : Math.max(pool + delta, 0);
+    cursor = addDays(cursor, 1);
+  }
+
+  return { pool, weekStartDate };
+}
+
+export function calculateAutoTdee(weightEntries, foodEntries, referenceDateKey) {
+  const referenceDate = parseDateKey(referenceDateKey);
+  if (!referenceDate) return { available: false, tdee: null, reason: "insufficient-data" };
+
+  const windowDays = 21;
+  const windowStartDate = addDays(referenceDate, -(windowDays - 1));
+  const windowStartKey = formatDateKey(windowStartDate);
+
+  const datedWeights = (weightEntries || [])
+    .filter((entry) => entry.date && toNumber(entry.weight_kg) !== null)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const proximityDays = 3;
+  const startWeight = datedWeights.find((entry) => {
+    const diff = Math.abs(parseDateKey(entry.date) - windowStartDate) / 86400000;
+    return diff <= proximityDays;
+  });
+  const endWeight = [...datedWeights].reverse().find((entry) => {
+    const diff = Math.abs(parseDateKey(entry.date) - referenceDate) / 86400000;
+    return diff <= proximityDays;
+  });
+
+  if (!startWeight || !endWeight) {
+    return { available: false, tdee: null, reason: "insufficient-data" };
+  }
+
+  const loggedDayIntakes = [];
+  let cursor = windowStartDate;
+  while (cursor <= referenceDate) {
+    const dateKey = formatDateKey(cursor);
+    const nutrition = calculateDailyNutrition(foodEntries, dateKey);
+    if (nutrition.count > 0) loggedDayIntakes.push(nutrition.calories_kcal);
+    cursor = addDays(cursor, 1);
+  }
+
+  if (loggedDayIntakes.length < 14) {
+    return { available: false, tdee: null, reason: "insufficient-data" };
+  }
+
+  const avgDailyIntake = average(loggedDayIntakes);
+  const weightChangeKg = toNumber(endWeight.weight_kg) - toNumber(startWeight.weight_kg);
+  const tdee = avgDailyIntake - (weightChangeKg * 7700) / windowDays;
+
+  return { available: true, tdee, reason: null };
 }
 
 export function parseDateKey(dateKey) {

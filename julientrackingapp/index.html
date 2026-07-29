@@ -54,6 +54,14 @@
       </nav>
     </div>
 
+    <div id="barcode-overlay" class="barcode-overlay" hidden>
+      <div class="barcode-overlay-head">
+        <p id="barcode-status">Kamera wird gestartet...</p>
+        <button class="btn ghost small" type="button" data-action="close-barcode-scanner">Abbrechen</button>
+      </div>
+      <video id="barcode-video" class="barcode-video" playsinline muted></video>
+    </div>
+
     <div id="update-banner" class="update-banner" role="status" aria-live="polite" hidden>
       <div>
         <strong>Update verfügbar</strong>

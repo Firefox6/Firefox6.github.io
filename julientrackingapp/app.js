@@ -3,10 +3,12 @@
   generateId,
   getAll,
   getItem,
+  getMeta,
   getSettings,
   migrateLegacyLocalStorageData,
   putItem,
   saveSettings,
+  setMeta,
   todayKey,
   toLocalIso,
 } from "./db.js";
@@ -17,13 +19,15 @@ import {
   calculateBMI,
   calculateDailyNutrition,
   calculateMaintenanceDelta,
+  calculateAutoTdee,
   calculateMovingAverage,
-  calculateNavyBodyFat,
-  calculateStrengthWorkoutVolume,
+  calculateWeightChartSeries,
   calculateWeeklyAverageWeight,
+  calculateWeeklyCaloriePool,
   calculateWeeklyTrainingStats,
   formatDateKey,
   getBMICategory,
+  getIsoWeekKey,
   parseDateKey,
   toNumber,
 } from "./calculations.js";
@@ -88,6 +92,10 @@ let data = {
 
 let toastTimer = null;
 let renderToken = 0;
+let scannedProduct = null;
+let barcodeStream = null;
+let barcodeAnimationFrame = null;
+let zxingControls = null;
 
 init();
 
@@ -99,6 +107,12 @@ async function init() {
   }
   await render();
   registerServiceWorker();
+
+  checkDueReviews();
+  setInterval(checkDueReviews, 60000);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) checkDueReviews();
+  });
 }
 
 function bindEvents() {
@@ -130,6 +144,10 @@ function bindEvents() {
   app.addEventListener("submit", handleSubmit);
   app.addEventListener("change", handleChange);
   app.addEventListener("input", handleInput);
+
+  document.querySelector("#barcode-overlay")?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-action='close-barcode-scanner']")) closeBarcodeOverlay();
+  });
 
   const colorScheme = window.matchMedia?.("(prefers-color-scheme: dark)");
   colorScheme?.addEventListener?.("change", () => applyTheme(data.settings));
@@ -210,6 +228,8 @@ function renderDashboardV2() {
   const calorieOpen = (toNumber(goals.calorie_goal_kcal) || 0) - (toNumber(nutrition.calories_kcal) || 0);
   const ringProgress = Math.min(Math.max(calorieProgress, 0), 100);
   const proteinRingProgress = Math.min(Math.max(proteinProgress, 0), 100);
+  const caloriePool = calculateWeeklyCaloriePool(data.food_entries, goals.calorie_goal_kcal, today).pool;
+  const autoTdee = calculateAutoTdee(data.weight_entries, data.food_entries, today);
 
   return `
     <section class="dashboard-today">
@@ -254,6 +274,18 @@ function renderDashboardV2() {
       </article>
     </section>
 
+    <section class="card">
+      <div class="section-head">
+        <div>
+          <h2>Gewichtsverlauf</h2>
+          <p class="section-note">Tagesgewicht (schwach) und 7-Tage-Schnitt (kräftig). Zum Scrollen wischen.</p>
+        </div>
+      </div>
+      <div class="chart-scroll" data-chart-scroll="dashboard-weight">
+        <canvas class="chart-canvas" data-chart="dashboard-weight" aria-label="Gewichtsverlauf mit 7-Tage-Schnitt"></canvas>
+      </div>
+    </section>
+
     <section class="dashboard-flow">
       <article class="card">
         <div class="section-head">
@@ -261,11 +293,13 @@ function renderDashboardV2() {
             <h2>Tagesziele</h2>
             <p class="section-note">${calorieOpen >= 0 ? `${fmt(calorieOpen, 0)} kcal übrig` : `${fmt(Math.abs(calorieOpen), 0)} kcal drüber`}.</p>
           </div>
+          <span class="pill ${caloriePool > 0 ? "ok" : ""}">${caloriePool > 0 ? "+" : ""}${fmt(caloriePool, 0)} kcal Pool</span>
         </div>
         <div class="primary-progress-grid">
           ${renderProgressRow("Kalorien", nutrition.calories_kcal, goals.calorie_goal_kcal, "kcal", { kind: "calories" })}
           ${renderProgressRow("Protein", nutrition.protein_g, goals.protein_goal_g, "g", { kind: "protein" })}
         </div>
+        <p class="section-note" style="margin-top: 10px;">${autoTdee.available ? `Dein berechneter Ø Verbrauch (letzte 21 Tage) liegt bei ca. ${fmt(autoTdee.tdee, 0)} kcal.` : "Noch nicht genug Daten für einen berechneten Verbrauch (Gewicht und Kalorien über mehrere Wochen erfassen)."}</p>
 
         <div class="training-mini">
           <span class="check-chip ${todayTraining.strength ? "is-done" : ""}">Kraft ${todayTraining.strength ? "erledigt" : "offen"}</span>
@@ -311,6 +345,7 @@ function renderCaloriesV2() {
         ${panelButton("quick", "+ Schnelleintrag")}
         ${panelButton("preset", "+ Aus Preset")}
         ${panelButton("new-preset", state.foodPresetEditId ? "Preset bearbeiten" : "+ Neues Preset")}
+        <button class="btn ${state.caloriePanel === "barcode" ? "primary" : "ghost"}" type="button" data-action="open-barcode-scanner">📷 Barcode Scannen</button>
         <button class="btn ghost" type="button" data-action="copy-yesterday">Gestern kopieren</button>
       </div>
       <div style="margin-top: 16px;">
@@ -497,6 +532,35 @@ function renderMoreV2() {
     </section>
 
     <section class="card">
+      <h2>Benachrichtigungen &amp; Fokus</h2>
+      <p class="section-note">Läuft nur, solange die App offen ist – bei komplett geschlossener App kommt keine Meldung.</p>
+      <form id="settings-notifications-form">
+        <div class="screen-stack" style="margin-top: 12px;">
+          <label class="check-row">
+            <input type="checkbox" name="daily_review_enabled" ${settings.notifications.daily_review_enabled ? "checked" : ""}>
+            Tägliches Review (20:30 Uhr) aktivieren
+          </label>
+          <label class="check-row">
+            <input type="checkbox" name="weekly_review_enabled" ${settings.notifications.weekly_review_enabled ? "checked" : ""}>
+            Wöchentliches Review (Sonntag 18:00 Uhr) aktivieren
+          </label>
+        </div>
+        <p class="section-note" style="margin-top: 14px;">Fokus-Metriken (werden in Benachrichtigung angezeigt)</p>
+        <div class="grid two" style="margin-top: 8px;">
+          ${notificationFocusCheckbox("calories", "Kcal & Rollover-Status", settings.notifications.focus)}
+          ${notificationFocusCheckbox("protein", "Protein", settings.notifications.focus)}
+          ${notificationFocusCheckbox("carbs", "Kohlenhydrate", settings.notifications.focus)}
+          ${notificationFocusCheckbox("fat", "Fett", settings.notifications.focus)}
+          ${notificationFocusCheckbox("fiber", "Ballaststoffe", settings.notifications.focus)}
+          ${notificationFocusCheckbox("sugar", "Zucker", settings.notifications.focus)}
+          ${notificationFocusCheckbox("salt", "Salz", settings.notifications.focus)}
+          ${notificationFocusCheckbox("training", "Training (Erledigt Haken)", settings.notifications.focus)}
+        </div>
+        <button class="btn primary" type="submit" style="margin-top: 14px;">Benachrichtigungen speichern</button>
+      </form>
+    </section>
+
+    <section class="card">
       <div class="section-head">
         <div>
           <h2>Daten</h2>
@@ -529,140 +593,20 @@ function renderMoreV2() {
   `;
 }
 
-function renderDashboard() {
-  const today = todayKey();
-  const settings = data.settings;
-  const goals = settings.goals;
-  const weightStats = buildWeightStats();
-  const nutrition = calculateDailyNutrition(data.food_entries, today);
-  const trainingStats = calculateWeeklyTrainingStats(data.workouts, today).thisWeek;
-  const avgCalories7 = average(lastNDays(today, 7).map((date) => calculateDailyNutrition(data.food_entries, date).calories_kcal));
-  const avgProtein7 = average(lastNDays(today, 7).map((date) => calculateDailyNutrition(data.food_entries, date).protein_g));
-  const proteinHits14 = lastNDays(today, 14).filter((date) => calculateDailyNutrition(data.food_entries, date).protein_g >= goals.protein_goal_g).length;
-  const calorieDelta14 = average(lastNDays(today, 14).map((date) => calculateDailyNutrition(data.food_entries, date).calories_kcal - goals.calorie_goal_kcal));
-  const maintenance = calculateMaintenanceDelta(nutrition.calories_kcal, settings.maintenance.min_kcal, settings.maintenance.max_kcal);
-
-  return `
-    <section class="grid dashboard-layout">
-      <div class="screen-stack">
-        <article class="card">
-          <div class="section-head">
-            <div>
-              <h2>Heute</h2>
-              <p class="section-note">${formatDate(today)}</p>
-            </div>
-            <div class="today-actions">
-              <span class="pill ${nutrition.calories_kcal <= goals.calorie_goal_kcal ? "ok" : "warn"}">${calorieBalanceText(nutrition.calories_kcal, goals.calorie_goal_kcal)}</span>
-              <button class="btn small primary" type="button" data-action="copy-chatgpt-daily-context">ChatGPT</button>
-            </div>
-          </div>
-          <div class="grid two">
-            ${renderMetric("Kcal", `${fmt(nutrition.calories_kcal, 0)} / ${fmt(goals.calorie_goal_kcal, 0)}`, `${calorieBalanceText(nutrition.calories_kcal, goals.calorie_goal_kcal)}`)}
-            ${renderMetric("Protein", `${fmt(nutrition.protein_g, 0)}g / ${fmt(goals.protein_goal_g, 0)}g`, `${fmt(Math.max(goals.protein_goal_g - nutrition.protein_g, 0), 0)}g offen`)}
-            ${renderMetric("KH", `${fmt(nutrition.carbs_g, 0)}g / ${fmt(goals.carbs_goal_g, 0)}g`, `${fmt(percent(nutrition.carbs_g, goals.carbs_goal_g), 0)}% vom Ziel`)}
-            ${renderMetric("Fett", `${fmt(nutrition.fat_g, 0)}g / ${fmt(goals.fat_goal_g, 0)}g`, `${fmt(percent(nutrition.fat_g, goals.fat_goal_g), 0)}% vom Ziel`)}
-          </div>
-          <div class="screen-stack" style="margin-top: 14px;">
-            ${renderProgressRow("Kalorien", nutrition.calories_kcal, goals.calorie_goal_kcal, "kcal")}
-            ${renderProgressRow("Proteinquote", nutrition.protein_g, goals.protein_goal_g, "g")}
-          </div>
-        </article>
-
-        <article class="card">
-          <div class="section-head">
-            <div>
-              <h2>Verlauf</h2>
-              <p class="section-note">Gewicht, Kalorien und Protein der letzten Tage.</p>
-            </div>
-          </div>
-          <div class="grid two">
-            <canvas class="chart-canvas" data-chart="dashboard-weight" aria-label="Gewicht und 7-Tage-Schnitt"></canvas>
-            <canvas class="chart-canvas" data-chart="calories-14" aria-label="Kalorien der letzten 14 Tage"></canvas>
-          </div>
-        </article>
-
-        <article class="card">
-          <div class="section-head">
-            <div>
-              <h2>Statistiken</h2>
-              <p class="section-note">Sachliche Kontrollwerte, ohne Rauschen.</p>
-            </div>
-          </div>
-          <div class="grid auto">
-            ${renderMetric("Ø Kcal 7 Tage", fmt(avgCalories7, 0), "Durchschnitt gegessen")}
-            ${renderMetric("Ø Protein 7 Tage", `${fmt(avgProtein7, 0)}g`, "Durchschnitt")}
-            ${renderMetric("Protein 14 Tage", `${proteinHits14}/14`, "Tage im Ziel")}
-            ${renderMetric("Ø Zielabweichung", `${fmtSigned(calorieDelta14, 0)} kcal`, "letzte 14 Tage")}
-          </div>
-        </article>
-      </div>
-
-      <div class="screen-stack">
-        <article class="card">
-          <div class="section-head">
-            <div>
-              <h2>Gewicht</h2>
-              <p class="section-note">${weightStats.latest ? formatDate(weightStats.latest.date) : "Noch kein Eintrag"}</p>
-            </div>
-          </div>
-          <div class="big-number">${weightStats.latest ? `${fmt(weightStats.latest.weight_kg, 1)} kg` : "–"}</div>
-          <div class="grid two" style="margin-top: 16px;">
-            ${renderMetric("7-Tage-Schnitt", weightStats.avg7 ? `${fmt(weightStats.avg7, 1)} kg` : "–", "Trendgewicht")}
-            ${renderMetric("Seit Start", weightStats.diffStart !== null ? `${fmtSigned(weightStats.diffStart, 1)} kg` : "–", "vom ersten Eintrag")}
-            ${renderMetric("Letzte 7 Tage", weightStats.diff7 !== null ? `${fmtSigned(weightStats.diff7, 1)} kg` : "–", "Tagesvergleich")}
-            ${renderMetric("Letzte 30 Tage", weightStats.diff30 !== null ? `${fmtSigned(weightStats.diff30, 1)} kg` : "–", "Tagesvergleich")}
-          </div>
-          <p class="section-note" style="margin-top: 14px;">${highestWeekText(weightStats)}</p>
-        </article>
-
-        <article class="card">
-          <h2>BMI und KFA</h2>
-          <div class="grid two">
-            ${renderMetric("BMI", weightStats.bmi ? fmt(weightStats.bmi, 1) : "–", weightStats.bmi ? getBMICategory(weightStats.bmi) : "Grösse und Gewicht nötig")}
-            ${renderMetric("KFA", weightStats.bodyFat ? `${fmt(weightStats.bodyFat, 1)}%` : "–", weightStats.bodyFat ? "Navy-Methode, Schätzung" : `KFA nicht berechenbar - ${bodyFatMissingText()}`)}
-          </div>
-        </article>
-
-        <article class="card">
-          <h2>Diese Woche</h2>
-          <div class="grid two">
-            ${renderMetric("Kraft", fmt(trainingStats.strength, 0), "Trainings")}
-            ${renderMetric("Cardio", fmt(trainingStats.cardio, 0), "Einheiten")}
-            ${renderMetric("Gesamt", fmt(trainingStats.total, 0), "Trainingstage")}
-            ${renderMetric("Volumen", `${fmt(trainingStats.volume, 0)} kg`, "Krafttraining")}
-          </div>
-        </article>
-
-        <article class="card">
-          <h2>Maintenance</h2>
-          <div class="kpi-row">
-            <div class="kpi-main">
-              <p class="kpi-title">Estimated Maintenance</p>
-              <p class="kpi-sub">${fmt(settings.maintenance.min_kcal, 0)}–${fmt(settings.maintenance.max_kcal, 0)} kcal</p>
-            </div>
-            <div class="kpi-value">${maintenanceText(maintenance)}</div>
-          </div>
-        </article>
-      </div>
-    </section>
-  `;
-}
-
 function renderWeight() {
   const stats = buildWeightStats();
   const editEntry = state.weightEditId ? data.weight_entries.find((entry) => entry.id === state.weightEditId) : null;
-  const entry = editEntry || { date: todayKey(), weight_kg: "", waist_cm: "", neck_cm: "", hip_cm: "", notes: "" };
+  const entry = editEntry || { date: todayKey(), weight_kg: "", notes: "" };
 
   return `
     <section class="grid auto">
       ${renderMetricCard("Aktuell", stats.latest ? `${fmt(stats.latest.weight_kg, 1)} kg` : "–", stats.latest ? formatDate(stats.latest.date) : "Noch kein Eintrag")}
       ${renderMetricCard("7-Tage-Schnitt", stats.avg7 ? `${fmt(stats.avg7, 1)} kg` : "–", "Trendgewicht")}
-      ${renderMetricCard("Startgewicht", stats.start ? `${fmt(stats.start.weight_kg, 1)} kg` : "–", "erster Eintrag")}
-      ${renderMetricCard("Höchstes Wochenmittel", stats.highestWeeklyAverage ? `${fmt(stats.highestWeeklyAverage.average, 1)} kg` : "–", stats.highestWeeklyAverage?.label || "–")}
-      ${renderMetricCard("Seit Start", stats.diffStart !== null ? `${fmtSigned(stats.diffStart, 1)} kg` : "–", "Veränderung")}
-      ${renderMetricCard("Letzter Monat", stats.diff30 !== null ? `${fmtSigned(stats.diff30, 1)} kg` : "–", "30 Tage")}
-      ${renderMetricCard("BMI", stats.bmi ? `${fmt(stats.bmi, 1)}` : "–", stats.bmi ? getBMICategory(stats.bmi) : "nicht berechenbar")}
-      ${renderMetricCard("KFA", stats.bodyFat ? `${fmt(stats.bodyFat, 1)}%` : "–", stats.bodyFat ? "Navy-Schätzung" : bodyFatMissingText())}
+    </section>
+
+    <section class="card">
+      ${renderBmiGauge(stats.bmi)}
+      <p class="section-note">${stats.bmi ? `BMI ${fmt(stats.bmi, 1)} · ${getBMICategory(stats.bmi)}` : "BMI nicht berechenbar – Grösse und Gewicht nötig."}</p>
     </section>
 
     <section class="card">
@@ -678,9 +622,6 @@ function renderWeight() {
         <div class="form-grid">
           ${field("Datum", `<input type="date" name="date" value="${attr(entry.date)}" required>`)}
           ${field("Gewicht kg", `<input type="number" name="weight_kg" inputmode="decimal" step="0.1" min="1" value="${attr(entry.weight_kg)}" required>`)}
-          ${field("Bauchumfang cm", `<input type="number" name="waist_cm" inputmode="decimal" step="0.1" min="1" value="${attr(entry.waist_cm ?? "")}">`)}
-          ${field("Halsumfang cm", `<input type="number" name="neck_cm" inputmode="decimal" step="0.1" min="1" value="${attr(entry.neck_cm ?? "")}">`)}
-          ${field("Hüftumfang cm", `<input type="number" name="hip_cm" inputmode="decimal" step="0.1" min="1" value="${attr(entry.hip_cm ?? "")}">`)}
           ${field("Notiz", `<textarea name="notes">${safe(entry.notes || "")}</textarea>`, "full")}
         </div>
         <button class="btn primary" type="submit">Speichern</button>
@@ -688,284 +629,8 @@ function renderWeight() {
     </section>
 
     <section class="card">
-      <div class="section-head">
-        <div>
-          <h2>Verlauf</h2>
-          <p class="section-note">Tagesgewicht und gleitender Schnitt.</p>
-        </div>
-      </div>
-      <canvas class="chart-canvas" data-chart="weight-history" aria-label="Gewichtsverlauf"></canvas>
-    </section>
-
-    <section class="card">
       <h2>Historie</h2>
       ${renderWeightHistory()}
-    </section>
-  `;
-}
-
-function renderCalories() {
-  const goals = data.settings.goals;
-  const nutrition = calculateDailyNutrition(data.food_entries, state.selectedDate);
-  const weightStats = buildWeightStats();
-  const proteinPerKg = weightStats.trendWeight ? nutrition.protein_g / weightStats.trendWeight : null;
-  const maintenance = calculateMaintenanceDelta(nutrition.calories_kcal, data.settings.maintenance.min_kcal, data.settings.maintenance.max_kcal);
-
-  return `
-    <section class="card">
-      <div class="section-head">
-        <div>
-          <h2>Tagesübersicht</h2>
-          <p class="section-note">${formatDate(state.selectedDate)}</p>
-        </div>
-        <div class="field" style="min-width: 170px;">
-          <label for="calories-date">Datum</label>
-          <input id="calories-date" type="date" value="${attr(state.selectedDate)}">
-        </div>
-      </div>
-      <div class="grid two">
-        ${renderMetric("Kcal", `${fmt(nutrition.calories_kcal, 0)} / ${fmt(goals.calorie_goal_kcal, 0)}`, calorieBalanceText(nutrition.calories_kcal, goals.calorie_goal_kcal))}
-        ${renderMetric("Protein", `${fmt(nutrition.protein_g, 0)}g / ${fmt(goals.protein_goal_g, 0)}g`, proteinPerKg ? `${fmt(proteinPerKg, 2)} g/kg` : "Gewicht fehlt")}
-        ${renderMetric("KH", `${fmt(nutrition.carbs_g, 0)}g / ${fmt(goals.carbs_goal_g, 0)}g`, `${fmt(percent(nutrition.carbs_g, goals.carbs_goal_g), 0)}% vom Ziel`)}
-        ${renderMetric("Fett", `${fmt(nutrition.fat_g, 0)}g / ${fmt(goals.fat_goal_g, 0)}g`, `${fmt(percent(nutrition.fat_g, goals.fat_goal_g), 0)}% vom Ziel`)}
-      </div>
-      <div class="screen-stack" style="margin-top: 14px;">
-        ${renderProgressRow("Kalorien", nutrition.calories_kcal, goals.calorie_goal_kcal, "kcal")}
-        ${renderProgressRow("Protein", nutrition.protein_g, goals.protein_goal_g, "g")}
-        ${nutrition.hasOptional ? renderOptionalNutrition(nutrition) : ""}
-      </div>
-      <p class="section-note" style="margin-top: 12px;">Estimated Maintenance: ${fmt(data.settings.maintenance.min_kcal, 0)}–${fmt(data.settings.maintenance.max_kcal, 0)} kcal. ${maintenanceText(maintenance)}</p>
-    </section>
-
-    <section class="card">
-      <div class="button-row">
-        ${panelButton("quick", "+ Schnelleintrag")}
-        ${panelButton("preset", "+ Aus Preset")}
-        ${panelButton("new-preset", "+ Neues Preset")}
-        <button class="btn ghost" type="button" data-action="copy-yesterday">Gestern kopieren</button>
-      </div>
-      <div style="margin-top: 16px;">
-        ${renderCaloriePanel()}
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="section-head">
-        <div>
-          <h2>Einträge</h2>
-          <p class="section-note">Gruppiert nach Mahlzeit.</p>
-        </div>
-      </div>
-      ${renderFoodEntriesForDate(state.selectedDate)}
-    </section>
-
-    <section class="card">
-      <div class="section-head">
-        <div>
-          <h2>Presets</h2>
-          <p class="section-note">Zutaten pro 100g und Fertigprodukte pro Einheit.</p>
-        </div>
-      </div>
-      ${renderFoodPresetList()}
-    </section>
-  `;
-}
-
-function renderTraining() {
-  const weekly = calculateWeeklyTrainingStats(data.workouts, todayKey());
-  const thisWeek = weekly.thisWeek;
-  const goal = toNumber(data.settings.goals.training_days_goal_per_week) || 0;
-  const goalText = goal ? `${fmt(Math.min(thisWeek.total, goal), 0)} von ${fmt(goal, 0)} Trainingstagen` : "Kein Wochenziel gesetzt";
-  const goalProgress = goal ? Math.min(100, (thisWeek.total / goal) * 100) : 0;
-
-  return `
-    <section class="grid auto">
-      ${renderMetricCard("Diese Woche", fmt(thisWeek.total, 0), "Trainings")}
-      ${renderMetricCard("Kraft", fmt(thisWeek.strength, 0), "Einheiten")}
-      ${renderMetricCard("Cardio", fmt(thisWeek.cardio, 0), "Einheiten")}
-      ${renderMetricCard("Volumen", `${fmt(thisWeek.volume, 0)} kg`, "Kraft")}
-    </section>
-
-    <section class="training-layout">
-      <div class="screen-stack">
-        <article class="card training-entry-card">
-          <div class="section-head">
-            <div>
-              <h2>Training erfassen</h2>
-              <p class="section-note">Eine Einheit auswählen, Daten eintragen, speichern.</p>
-            </div>
-          </div>
-          <div class="segmented training-type-tabs" role="group" aria-label="Trainingstyp">
-            ${workoutTypeButton("strength", "Kraft")}
-            ${workoutTypeButton("cardio", "Cardio")}
-            ${workoutTypeButton("other", "Sonstiges")}
-          </div>
-          <div class="training-form-panel">
-            ${state.workoutType === "strength" ? renderStrengthWorkoutForm() : ""}
-            ${state.workoutType === "cardio" ? renderCardioWorkoutForm() : ""}
-            ${state.workoutType === "other" ? renderOtherWorkoutForm() : ""}
-          </div>
-        </article>
-
-        <article class="card">
-          <div class="section-head">
-            <div>
-              <h2>Historie</h2>
-              <p class="section-note">Neueste Einheiten zuerst.</p>
-            </div>
-          </div>
-          ${renderWorkoutList()}
-        </article>
-      </div>
-
-      <aside class="screen-stack">
-        <article class="card">
-          <div class="section-head">
-            <div>
-              <h2>Wochenziel</h2>
-              <p class="section-note">${safe(goalText)}</p>
-            </div>
-          </div>
-          <div class="progress"><span style="width: ${attr(goalProgress)}%;"></span></div>
-          <div class="pill-row training-summary-pills">
-            <span class="pill">${fmt(thisWeek.total, 0)} gesamt</span>
-            <span class="pill">${fmt(thisWeek.strength, 0)} Kraft</span>
-            <span class="pill">${fmt(thisWeek.cardio, 0)} Cardio</span>
-          </div>
-        </article>
-
-        <article class="card">
-          <div class="section-head">
-            <div>
-              <h2>Wochenübersicht</h2>
-              <p class="section-note">Trainingstage der letzten Wochen.</p>
-            </div>
-          </div>
-          <canvas class="chart-canvas" data-chart="training-weeks" aria-label="Training pro Woche"></canvas>
-        </article>
-
-        <article class="card">
-          <details class="training-presets">
-            <summary>
-              <span>
-                <strong>Übungs-Presets</strong>
-                <small>Für schnelle Krafttraining-Eingabe</small>
-              </span>
-            </summary>
-            <div class="training-presets-body">
-              ${renderExercisePresetForm()}
-              ${renderExercisePresetList()}
-            </div>
-          </details>
-        </article>
-      </aside>
-    </section>
-  `;
-}
-
-function renderMore() {
-  const settings = data.settings;
-  const age = calculateAge(settings.profile.birth_date);
-
-  return `
-    <section class="grid auto">
-      ${renderMetricCard("Alter", age !== null ? fmt(age, 0) : "–", "aus Geburtsdatum")}
-      ${renderMetricCard("Grösse", settings.profile.height_cm ? `${fmt(settings.profile.height_cm, 0)} cm` : "–", "Profil")}
-      ${renderMetricCard("Kalorienziel", `${fmt(settings.goals.calorie_goal_kcal, 0)} kcal`, "manuell")}
-      ${renderMetricCard("Daten", `${data.weight_entries.length + data.food_entries.length + data.workouts.length}`, "Einträge")}
-    </section>
-
-    <section class="card">
-      <h2>Profil</h2>
-      <form id="settings-profile-form">
-        <div class="form-grid">
-          ${field("Körpergrösse cm", `<input type="number" name="height_cm" min="1" step="1" value="${attr(settings.profile.height_cm ?? "")}">`)}
-          ${field("Geburtsdatum", `<input type="date" name="birth_date" value="${attr(settings.profile.birth_date || "")}">`)}
-          ${field("Geschlecht", `
-            <select name="sex">
-              ${option("male", "männlich", settings.profile.sex)}
-              ${option("female", "weiblich", settings.profile.sex)}
-            </select>
-          `)}
-        </div>
-        <button class="btn primary" type="submit">Profil speichern</button>
-      </form>
-    </section>
-
-    <section class="card">
-      <h2>Ziele</h2>
-      <form id="settings-goals-form">
-        <div class="form-grid three">
-          ${field("Kalorienziel kcal", `<input type="number" name="calorie_goal_kcal" min="0" step="1" value="${attr(settings.goals.calorie_goal_kcal ?? "")}">`)}
-          ${field("Proteinziel g", `<input type="number" name="protein_goal_g" min="0" step="1" value="${attr(settings.goals.protein_goal_g ?? "")}">`)}
-          ${field("KH-Ziel g", `<input type="number" name="carbs_goal_g" min="0" step="1" value="${attr(settings.goals.carbs_goal_g ?? "")}">`)}
-          ${field("Fett-Ziel g", `<input type="number" name="fat_goal_g" min="0" step="1" value="${attr(settings.goals.fat_goal_g ?? "")}">`)}
-          ${field("Ballaststoff-Ziel g", `<input type="number" name="fiber_goal_g" min="0" step="1" value="${attr(settings.goals.fiber_goal_g ?? "")}">`)}
-          ${field("Zucker-Maximum g", `<input type="number" name="sugar_max_g" min="0" step="1" value="${attr(settings.goals.sugar_max_g ?? "")}">`)}
-          ${field("Salz-Maximum g", `<input type="number" name="salt_max_g" min="0" step="0.1" value="${attr(settings.goals.salt_max_g ?? "")}">`)}
-          ${field("Zielgewicht kg", `<input type="number" name="weight_goal_kg" min="0" step="0.1" value="${attr(settings.goals.weight_goal_kg ?? "")}">`)}
-          ${field("Trainingstage/Woche", `<input type="number" name="training_days_goal_per_week" min="0" step="1" value="${attr(settings.goals.training_days_goal_per_week ?? "")}">`)}
-        </div>
-        <button class="btn primary" type="submit">Ziele speichern</button>
-      </form>
-    </section>
-
-    <section class="card">
-      <h2>Maintenance Calories</h2>
-      <form id="settings-maintenance-form">
-        <div class="form-grid">
-          ${field("Minimum kcal", `<input type="number" name="min_kcal" min="0" step="1" value="${attr(settings.maintenance.min_kcal ?? "")}">`)}
-          ${field("Maximum kcal", `<input type="number" name="max_kcal" min="0" step="1" value="${attr(settings.maintenance.max_kcal ?? "")}">`)}
-        </div>
-        <button class="btn primary" type="submit">Maintenance speichern</button>
-      </form>
-    </section>
-
-    <section class="card">
-      <h2>Erinnerungen</h2>
-      <form id="settings-reminders-form">
-        <div class="form-grid">
-          ${field("Grösse prüfen alle X Tage", `<input type="number" name="height_check_interval_days" min="0" step="1" value="${attr(settings.reminders.height_check_interval_days ?? "")}">`)}
-          ${field("Backup alle X Tage", `<input type="number" name="backup_interval_days" min="0" step="1" value="${attr(settings.reminders.backup_interval_days ?? "")}">`)}
-        </div>
-        <div class="button-row">
-          <button class="btn primary" type="submit">Erinnerungen speichern</button>
-          <button class="btn ghost" type="button" data-action="mark-height">Grösse bestätigt</button>
-          <button class="btn ghost" type="button" data-action="mark-backup">Backup erledigt</button>
-        </div>
-      </form>
-    </section>
-
-    <section class="card">
-      <div class="section-head">
-        <div>
-          <h2>Daten</h2>
-          <p class="section-note">Vollständiger JSON-Export und Import.</p>
-        </div>
-      </div>
-      <div class="grid auto">
-        ${renderMetric("Gewicht", fmt(data.weight_entries.length, 0), "Einträge")}
-        ${renderMetric("Kalorien", fmt(data.food_entries.length, 0), "Einträge")}
-        ${renderMetric("Food-Presets", fmt(data.food_presets.length, 0), "gespeichert")}
-        ${renderMetric("Trainings", fmt(data.workouts.length, 0), "Einträge")}
-        ${renderMetric("Übungen", fmt(data.exercise_presets.length, 0), "Presets")}
-      </div>
-      <div class="button-row" style="margin-top: 14px;">
-        <button class="btn primary" type="button" data-action="export-json">JSON exportieren</button>
-      </div>
-      <form id="import-form" style="margin-top: 16px;">
-        <div class="form-grid">
-          ${field("Import-Datei", `<input type="file" name="import_file" accept="application/json" required>`)}
-          ${field("Modus", `
-            <select name="import_mode">
-              <option value="merge">Zusammenführen</option>
-              <option value="replace">Alles ersetzen</option>
-              <option value="presets">Nur Presets importieren</option>
-            </select>
-          `)}
-        </div>
-        <button class="btn" type="submit">Import starten</button>
-      </form>
     </section>
   `;
 }
@@ -1015,6 +680,19 @@ async function handleActionClick(event) {
       await copyYesterdayFoods();
     }
 
+    if (action === "open-barcode-scanner") {
+      await openBarcodeOverlay();
+    }
+
+    if (action === "close-barcode-scanner") {
+      closeBarcodeOverlay();
+    }
+
+    if (action === "cancel-barcode-scan") {
+      scannedProduct = null;
+      await render();
+    }
+
     if (action === "copy-chatgpt-daily-context") {
       await copyChatGptDailyContextToClipboard();
     }
@@ -1034,46 +712,8 @@ async function handleActionClick(event) {
       });
     }
 
-    if (action === "set-workout-type") {
-      if (state.workoutType === button.dataset.type) return;
-      syncStrengthDraftFromDOM();
-      state.workoutType = button.dataset.type;
-      await render();
-    }
-
-    if (action === "add-draft-exercise") {
-      syncStrengthDraftFromDOM();
-      addDraftExerciseFromForm();
-      await render();
-    }
-
-    if (action === "remove-draft-exercise") {
-      syncStrengthDraftFromDOM();
-      state.strengthDraft.splice(Number(button.dataset.targetExerciseIndex), 1);
-      await render();
-    }
-
-    if (action === "add-draft-set") {
-      syncStrengthDraftFromDOM();
-      const index = Number(button.dataset.targetExerciseIndex);
-      state.strengthDraft[index]?.sets.push({ weight_kg: "", reps: "" });
-      await render();
-    }
-
-    if (action === "remove-draft-set") {
-      syncStrengthDraftFromDOM();
-      const exerciseIndex = Number(button.dataset.targetExerciseIndex);
-      const setIndex = Number(button.dataset.targetSetIndex);
-      state.strengthDraft[exerciseIndex]?.sets.splice(setIndex, 1);
-      await render();
-    }
-
     if (action === "delete-workout") {
       await confirmDelete("Training löschen?", async () => deleteItem("workouts", button.dataset.id));
-    }
-
-    if (action === "delete-exercise-preset") {
-      await confirmDelete("Übungs-Preset löschen?", async () => deleteItem("exercise_presets", button.dataset.id));
     }
 
     if (action === "export-json") {
@@ -1103,15 +743,13 @@ async function handleSubmit(event) {
     if (form.id === "quick-food-form") await saveQuickFood(form);
     if (form.id === "preset-food-form") await saveFoodFromPreset(form);
     if (form.id === "food-preset-form") await saveFoodPreset(form);
-    if (form.id === "strength-workout-form") await saveStrengthWorkout(form);
-    if (form.id === "cardio-workout-form") await saveCardioWorkout(form);
-    if (form.id === "other-workout-form") await saveOtherWorkout(form);
-    if (form.id === "exercise-preset-form") await saveExercisePreset(form);
     if (form.id === "settings-profile-form") await saveProfileSettings(form);
     if (form.id === "settings-goals-form") await saveGoalSettings(form);
     if (form.id === "settings-preferences-form") await savePreferenceSettings(form);
     if (form.id === "settings-maintenance-form") await saveMaintenanceSettings(form);
     if (form.id === "settings-reminders-form") await saveReminderSettings(form);
+    if (form.id === "settings-notifications-form") await saveNotificationSettings(form);
+    if (form.id === "barcode-food-form") await saveBarcodeFood(form);
     if (form.id === "import-form") await importData(form);
   } catch (error) {
     showToast(error.message || "Speichern fehlgeschlagen.");
@@ -1156,12 +794,8 @@ async function handleChange(event) {
 function handleInput(event) {
   const target = event.target;
 
-  if (["cardio-duration", "cardio-distance", "cardio-speed"].includes(target.id)) {
-    autoFillCardio(target.id);
-  }
-
-  if (["exercise_name", "set_weight", "set_reps"].includes(target.name)) {
-    updateStrengthDraftSummaryFromDOM();
+  if (target.id === "barcode-quantity") {
+    updateBarcodeFormFromQuantity();
   }
 
   if (["preset-select", "preset-quantity"].includes(target.id)) {
@@ -1182,9 +816,6 @@ async function saveWeightEntry(form) {
     id,
     date,
     weight_kg: weight,
-    waist_cm: optionalPositiveNumber(form, "waist_cm", "Bauchumfang muss sinnvoll sein."),
-    neck_cm: optionalPositiveNumber(form, "neck_cm", "Halsumfang muss sinnvoll sein."),
-    hip_cm: optionalPositiveNumber(form, "hip_cm", "Hüftumfang muss sinnvoll sein."),
     notes: formValue(form, "notes"),
     created_at: existing?.created_at || now,
     updated_at: now,
@@ -1301,110 +932,47 @@ async function saveFoodPreset(form) {
   await render();
 }
 
-async function saveStrengthWorkout(form) {
-  syncStrengthDraftFromDOM();
-  const date = formValue(form, "date");
-  if (!date) throw new Error("Bitte Datum eintragen.");
-
-  const exercises = state.strengthDraft
-    .map((exercise) => ({
-      exercise_id: exercise.exercise_id || slugId("exercise", exercise.name),
-      name: exercise.name,
-      sets: (exercise.sets || [])
-        .map((set) => ({
-          weight_kg: toNumber(set.weight_kg) || 0,
-          reps: toNumber(set.reps) || 0,
-        }))
-        .filter((set) => set.reps > 0 && set.weight_kg >= 0),
-    }))
-    .filter((exercise) => exercise.name && exercise.sets.length);
-
-  if (!exercises.length) throw new Error("Bitte mindestens eine Übung mit Set eintragen.");
-
-  const now = toLocalIso();
-  await putItem("workouts", {
-    id: generateId("workout"),
-    date,
-    type: "strength",
-    name: formValue(form, "name") || "Krafttraining",
-    duration_min: optionalNonNegativeNumber(form, "duration_min", "Dauer darf nicht negativ sein."),
-    exercises,
-    notes: formValue(form, "notes"),
-    created_at: now,
-    updated_at: now,
-  });
-
-  state.strengthDraft = [];
-  showToast("Krafttraining gespeichert.");
-  await render();
-}
-
-async function saveCardioWorkout(form) {
-  const date = formValue(form, "date");
-  if (!date) throw new Error("Bitte Datum eintragen.");
-
-  const duration = requiredPositiveNumber(form, "duration_min", "Bitte Dauer eintragen.");
-  let distance = optionalNonNegativeNumber(form, "distance_km", "Distanz darf nicht negativ sein.");
-  let speed = optionalNonNegativeNumber(form, "speed_kmh", "Geschwindigkeit darf nicht negativ sein.");
-
-  if (duration && distance !== null && speed === null) speed = round(distance / (duration / 60), 1);
-  if (duration && speed !== null && distance === null) distance = round(speed * (duration / 60), 2);
-
-  const now = toLocalIso();
-  await putItem("workouts", {
-    id: generateId("cardio"),
-    date,
-    type: "cardio",
-    name: formValue(form, "name") || "Laufband",
-    duration_min: duration,
-    distance_km: distance,
-    speed_kmh: speed,
-    notes: formValue(form, "notes"),
-    created_at: now,
-    updated_at: now,
-  });
-
-  showToast("Cardio gespeichert.");
-  await render();
-}
-
-async function saveOtherWorkout(form) {
-  const date = formValue(form, "date");
-  if (!date) throw new Error("Bitte Datum eintragen.");
-
-  const now = toLocalIso();
-  await putItem("workouts", {
-    id: generateId("workout"),
-    date,
-    type: "other",
-    name: formValue(form, "name") || "Training",
-    duration_min: optionalNonNegativeNumber(form, "duration_min", "Dauer darf nicht negativ sein."),
-    notes: formValue(form, "notes"),
-    created_at: now,
-    updated_at: now,
-  });
-
-  showToast("Training gespeichert.");
-  await render();
-}
-
-async function saveExercisePreset(form) {
+async function saveBarcodeFood(form) {
   const name = formValue(form, "name");
-  if (!name) throw new Error("Bitte Übungsname eintragen.");
+  if (!name) throw new Error("Bitte Name eintragen.");
+  const quantity = requiredPositiveNumber(form, "quantity", "Bitte Menge eintragen.");
 
-  const now = toLocalIso();
-  await putItem("exercise_presets", {
-    id: generateId("exercise"),
+  const entry = buildFoodEntryFromForm(form, {
+    id: generateId("food"),
+    date: state.selectedDate,
     name,
-    category: formValue(form, "category") || "Kraft",
-    muscle_groups: splitTags(formValue(form, "muscle_groups")),
-    default_tracking: formValue(form, "default_tracking") || "weight_reps",
-    notes: formValue(form, "notes"),
-    created_at: now,
-    updated_at: now,
+    meal: formValue(form, "meal"),
+    quantity,
+    unit: "g",
+    preset_id: null,
   });
 
-  showToast("Übungs-Preset gespeichert.");
+  let presetId = null;
+  if (form.elements.namedItem("barcode_save_preset")?.checked) {
+    const factor = 100 / quantity;
+    const preset = buildPresetFromValues({
+      name,
+      type: "ingredient_100g",
+      unit: "g",
+      base_quantity: 100,
+      calories_kcal: round(entry.calories_kcal * factor, 1),
+      protein_g: round(entry.protein_g * factor, 1),
+      carbs_g: round(entry.carbs_g * factor, 1),
+      fat_g: round(entry.fat_g * factor, 1),
+      fiber_g: scaleOptional(entry.fiber_g, factor),
+      sugar_g: scaleOptional(entry.sugar_g, factor),
+      salt_g: scaleOptional(entry.salt_g, factor),
+      tags: ["Barcode"],
+    });
+    await putItem("food_presets", preset);
+    presetId = preset.id;
+  }
+
+  entry.preset_id = presetId;
+  await putItem("food_entries", entry);
+  scannedProduct = null;
+  state.caloriePanel = "quick";
+  showToast("Eintrag gespeichert.");
   await render();
 }
 
@@ -1456,6 +1024,27 @@ async function saveReminderSettings(form) {
   settings.reminders.backup_interval_days = optionalNonNegativeNumber(form, "backup_interval_days", "Intervall darf nicht negativ sein.");
   await saveSettings(settings);
   showToast("Erinnerungen gespeichert.");
+  await render();
+}
+
+async function saveNotificationSettings(form) {
+  const settings = structuredClone(data.settings);
+  const dailyEnabled = form.elements.namedItem("daily_review_enabled")?.checked || false;
+  const weeklyEnabled = form.elements.namedItem("weekly_review_enabled")?.checked || false;
+  const wasEnabled = settings.notifications.daily_review_enabled || settings.notifications.weekly_review_enabled;
+
+  settings.notifications.daily_review_enabled = dailyEnabled;
+  settings.notifications.weekly_review_enabled = weeklyEnabled;
+  for (const key of Object.keys(settings.notifications.focus)) {
+    settings.notifications.focus[key] = form.elements.namedItem(`focus_${key}`)?.checked || false;
+  }
+
+  if (!wasEnabled && (dailyEnabled || weeklyEnabled) && "Notification" in window) {
+    await Notification.requestPermission();
+  }
+
+  await saveSettings(settings);
+  showToast("Benachrichtigungen gespeichert.");
   await render();
 }
 
@@ -1569,6 +1158,87 @@ function isReminderDue(lastDate, intervalDays) {
   return diffDays >= interval;
 }
 
+async function checkDueReviews() {
+  const settings = data.settings;
+  if (!settings?.notifications) return;
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+
+  const now = new Date();
+  const todayDateKey = todayKey(now);
+
+  if (settings.notifications.daily_review_enabled) {
+    const due = now.getHours() > 20 || (now.getHours() === 20 && now.getMinutes() >= 30);
+    if (due) {
+      const lastSent = await getMeta("last_daily_review_sent_date");
+      if (lastSent?.value !== todayDateKey) {
+        await sendReviewNotification("daily");
+        await setMeta("last_daily_review_sent_date", todayDateKey);
+      }
+    }
+  }
+
+  if (settings.notifications.weekly_review_enabled) {
+    const due = now.getDay() === 0 && (now.getHours() > 18 || (now.getHours() === 18 && now.getMinutes() >= 0));
+    if (due) {
+      const weekKey = getIsoWeekKey(todayDateKey).key;
+      const lastSent = await getMeta("last_weekly_review_sent_week");
+      if (lastSent?.value !== weekKey) {
+        await sendReviewNotification("weekly");
+        await setMeta("last_weekly_review_sent_week", weekKey);
+      }
+    }
+  }
+}
+
+async function sendReviewNotification(type) {
+  const title = type === "daily" ? "Tages-Review" : "Wochen-Review";
+  const body = type === "daily" ? buildDailyReviewText() : buildWeeklyReviewText();
+
+  if ("serviceWorker" in navigator) {
+    const registration = await navigator.serviceWorker.ready;
+    await registration.showNotification(title, { body, tag: `fittrack-${type}-review` });
+  } else {
+    new Notification(title, { body, tag: `fittrack-${type}-review` });
+  }
+}
+
+function buildDailyReviewText() {
+  const focus = data.settings.notifications.focus;
+  const goals = data.settings.goals;
+  const today = todayKey();
+  const nutrition = calculateDailyNutrition(data.food_entries, today);
+  const pool = calculateWeeklyCaloriePool(data.food_entries, goals.calorie_goal_kcal, today).pool;
+  const training = getTrainingCompletion(today);
+  const parts = [];
+
+  if (focus.calories) parts.push(`${fmt(nutrition.calories_kcal, 0)} / ${fmt(goals.calorie_goal_kcal, 0)} kcal (Pool ${pool >= 0 ? "+" : ""}${fmt(pool, 0)})`);
+  if (focus.protein) parts.push(`${fmt(nutrition.protein_g, 0)}g Protein`);
+  if (focus.carbs) parts.push(`${fmt(nutrition.carbs_g, 0)}g KH`);
+  if (focus.fat) parts.push(`${fmt(nutrition.fat_g, 0)}g Fett`);
+  if (focus.fiber) parts.push(`${fmt(nutrition.fiber_g, 0)}g Ballaststoffe`);
+  if (focus.sugar) parts.push(`${fmt(nutrition.sugar_g, 0)}g Zucker`);
+  if (focus.salt) parts.push(`${fmt(nutrition.salt_g, 1)}g Salz`);
+  if (focus.training) parts.push(`Kraft ${training.strength ? "erledigt" : "offen"} · Cardio ${training.cardio ? "erledigt" : "offen"}`);
+
+  return parts.join(" | ") || "Review verfügbar.";
+}
+
+function buildWeeklyReviewText() {
+  const focus = data.settings.notifications.focus;
+  const goals = data.settings.goals;
+  const today = todayKey();
+  const weightStats = buildWeightStats();
+  const pool = calculateWeeklyCaloriePool(data.food_entries, goals.calorie_goal_kcal, today).pool;
+  const trainingStats = calculateWeeklyTrainingStats(data.workouts, today).thisWeek;
+  const parts = [];
+
+  if (focus.calories) parts.push(`Rest-Pool ${pool >= 0 ? "+" : ""}${fmt(pool, 0)} kcal`);
+  if (focus.protein && weightStats.avg7) parts.push(`Ø ${fmt(weightStats.avg7, 1)} kg`);
+  if (focus.training) parts.push(`${fmt(trainingStats.strength, 0)}x Kraft, ${fmt(trainingStats.cardio, 0)}x Cardio`);
+
+  return parts.join(" | ") || "Wochen-Review verfügbar.";
+}
+
 function buildWeightStats() {
   const entries = data.weight_entries
     .filter((entry) => entry.date && toNumber(entry.weight_kg))
@@ -1586,14 +1256,6 @@ function buildWeightStats() {
   const latestWeeklyAverage = weekly.at(-1) || null;
   const trendWeight = avg7 || latest?.weight_kg || null;
   const bmi = calculateBMI(trendWeight, data.settings.profile.height_cm);
-  const measurementEntry = [...entries].reverse().find((entry) => entry.waist_cm || entry.neck_cm || entry.hip_cm) || latest;
-  const bodyFat = calculateNavyBodyFat({
-    sex: data.settings.profile.sex,
-    heightCm: data.settings.profile.height_cm,
-    waistCm: measurementEntry?.waist_cm,
-    neckCm: measurementEntry?.neck_cm,
-    hipCm: measurementEntry?.hip_cm,
-  });
 
   return {
     entries,
@@ -1608,7 +1270,6 @@ function buildWeightStats() {
     latestWeeklyAverage,
     trendWeight,
     bmi,
-    bodyFat,
     diffStart: latest && start ? latest.weight_kg - start.weight_kg : null,
     diff7: latest ? diffSince(entries, latest.date, 7) : null,
     diff30: latest ? diffSince(entries, latest.date, 30) : null,
@@ -1636,7 +1297,6 @@ function buildChatGptDailyContext() {
       current_weight_kg: nullIfEmpty(weightStats.latest?.weight_kg),
       trend_weight_kg: nullIfEmpty(weightStats.avg7),
       bmi: nullIfEmpty(weightStats.bmi),
-      body_fat_percent_navy: nullIfEmpty(weightStats.bodyFat),
     },
     goals: buildChatGptGoals(goals, settings),
     current_status: {
@@ -1659,9 +1319,6 @@ function buildChatGptDailyContext() {
         ? {
             date: weightStats.latest.date,
             weight_kg: nullIfEmpty(weightStats.latest.weight_kg),
-            waist_cm: nullIfEmpty(weightStats.latest.waist_cm),
-            neck_cm: nullIfEmpty(weightStats.latest.neck_cm),
-            hip_cm: nullIfEmpty(weightStats.latest.hip_cm),
           }
         : null,
       seven_day_average_kg: nullIfEmpty(weightStats.avg7),
@@ -1914,27 +1571,6 @@ function diffSince(entries, endDate, days) {
   return latest.weight_kg - previous.weight_kg;
 }
 
-function highestWeekText(stats) {
-  if (!stats.highestWeeklyAverage || stats.diffHighestWeeklyAverage === null) {
-    return "Noch nicht genug Wochenwerte für eine Trendzeile.";
-  }
-
-  const diff = stats.diffHighestWeeklyAverage;
-  if (diff < 0) {
-    return `Du bist aktuell ${fmt(Math.abs(diff), 1)} kg unter deinem höchsten Wochenmittel.`;
-  }
-  if (diff > 0) {
-    return `Du bist aktuell ${fmt(diff, 1)} kg über deinem höchsten Wochenmittel.`;
-  }
-  return "Du bist aktuell genau auf deinem höchsten Wochenmittel.";
-}
-
-function bodyFatMissingText() {
-  const sex = data.settings.profile.sex;
-  if (sex === "female") return "Bauch, Hals und Hüfte erfassen.";
-  return "Bauch- und Halsumfang erfassen.";
-}
-
 function normalizeSex(sex) {
   return sex === "female" ? "female" : "male";
 }
@@ -1949,7 +1585,7 @@ function renderWeightHistory() {
         <div class="list-row">
           <div>
             <p class="list-row-title">${formatDate(entry.date)} · ${fmt(entry.weight_kg, 1)} kg</p>
-            <p class="list-row-meta">${measurementSummary(entry)}${entry.notes ? ` · ${safe(entry.notes)}` : ""}</p>
+            <p class="list-row-meta">${entry.notes ? safe(entry.notes) : "Keine Notiz"}</p>
           </div>
           <div class="list-actions">
             <button class="btn small ghost" type="button" data-action="edit-weight" data-id="${attr(entry.id)}">Bearbeiten</button>
@@ -1964,6 +1600,7 @@ function renderWeightHistory() {
 function renderCaloriePanel() {
   if (state.caloriePanel === "preset") return renderPresetEntryForm();
   if (state.caloriePanel === "new-preset") return renderFoodPresetForm();
+  if (state.caloriePanel === "barcode") return renderBarcodeScanForm();
   return renderQuickFoodForm();
 }
 
@@ -1992,6 +1629,44 @@ function renderQuickFoodForm() {
         ${field("Basis-Menge", `<input type="number" name="preset_base_quantity" min="0.01" step="0.01" value="1">`)}
       </div>
       <button class="btn primary" type="submit">Schnelleintrag speichern</button>
+    </form>
+  `;
+}
+
+function renderBarcodeScanForm() {
+  if (!scannedProduct) {
+    return `
+      <div class="empty">
+        Noch kein Produkt gescannt.
+        <div class="button-row" style="margin-top: 10px;">
+          <button class="btn primary" type="button" data-action="open-barcode-scanner">📷 Barcode Scannen</button>
+        </div>
+      </div>
+    `;
+  }
+
+  const factor = scannedProduct.quantity / 100;
+
+  return `
+    <form id="barcode-food-form">
+      <div class="form-grid">
+        ${field("Name", `<input name="name" value="${attr(scannedProduct.name)}" required>`)}
+        ${field("Menge g", `<input id="barcode-quantity" type="number" name="quantity" min="1" step="1" value="${attr(scannedProduct.quantity)}" required>`)}
+        ${field("Mahlzeit", mealSelect("meal"))}
+        ${field("kcal", `<input id="barcode-calories" type="number" name="calories_kcal" min="0" step="0.1" value="${attr(round(scannedProduct.caloriesPer100 * factor, 1))}">`)}
+        ${field("Protein g", `<input id="barcode-protein" type="number" name="protein_g" min="0" step="0.1" value="${attr(round(scannedProduct.proteinPer100 * factor, 1))}">`)}
+        ${field("KH g", `<input id="barcode-carbs" type="number" name="carbs_g" min="0" step="0.1" value="${attr(round(scannedProduct.carbsPer100 * factor, 1))}">`)}
+        ${field("Fett g", `<input id="barcode-fat" type="number" name="fat_g" min="0" step="0.1" value="${attr(round(scannedProduct.fatPer100 * factor, 1))}">`)}
+        ${field("Notiz", `<textarea name="notes"></textarea>`, "full")}
+      </div>
+      <label class="check-row">
+        <input type="checkbox" name="barcode_save_preset">
+        Als Preset speichern
+      </label>
+      <div class="button-row" style="margin-top: 10px;">
+        <button class="btn primary" type="submit">Eintragen</button>
+        <button class="btn ghost" type="button" data-action="cancel-barcode-scan">Neu scannen</button>
+      </div>
     </form>
   `;
 }
@@ -2102,307 +1777,89 @@ function renderFoodPresetList() {
   `;
 }
 
-function renderStrengthWorkoutForm() {
-  const stats = strengthDraftStats();
-
-  return `
-    <div class="screen-stack">
-      <div class="training-exercise-picker">
-        <div>
-          <h3>Übung hinzufügen</h3>
-          <p class="section-note">Preset wählen oder direkt einen Namen eintragen.</p>
-        </div>
-        <div class="form-grid">
-          ${field("Aus Preset", `
-            <select id="draft-exercise-preset">
-              <option value="">Preset wählen</option>
-              ${data.exercise_presets.map((exercise) => `<option value="${attr(exercise.id)}">${safe(exercise.name)}</option>`).join("")}
-            </select>
-          `)}
-          ${field("Oder Name", `<input id="draft-exercise-name" placeholder="z.B. Bankdrücken">`)}
-        </div>
-        <div class="button-row" style="margin-top: 12px;">
-          <button class="btn" type="button" data-action="add-draft-exercise">Übung hinzufügen</button>
-        </div>
-      </div>
-
-      <form id="strength-workout-form">
-        <div class="form-grid">
-          ${field("Datum", `<input type="date" name="date" value="${attr(todayKey())}" required>`)}
-          ${field("Name", `<input name="name" value="Ganzkörper">`)}
-          ${field("Dauer Minuten", `<input type="number" name="duration_min" min="0" step="1">`)}
-          ${field("Notiz", `<textarea name="notes"></textarea>`, "full")}
-        </div>
-        <div class="pill-row training-summary-pills" aria-label="Krafttraining Entwurf">
-          <span class="pill"><span data-strength-stat="exercises">${fmt(stats.exercises, 0)}</span> Übungen</span>
-          <span class="pill"><span data-strength-stat="sets">${fmt(stats.sets, 0)}</span> Sätze</span>
-          <span class="pill"><span data-strength-stat="volume">${fmt(stats.volume, 0)}</span> kg Volumen</span>
-        </div>
-        ${renderStrengthDraft()}
-        <div class="training-save-row">
-          <button class="btn primary" type="submit">Krafttraining speichern</button>
-        </div>
-      </form>
-    </div>
-  `;
-}
-
-function strengthDraftStats() {
-  return state.strengthDraft.reduce((total, exercise) => {
-    const sets = (exercise.sets || []).filter((set) => toNumber(set.reps) > 0);
-    const volume = sets.reduce((sum, set) => sum + ((toNumber(set.weight_kg) || 0) * (toNumber(set.reps) || 0)), 0);
-    return {
-      exercises: total.exercises + (exercise.name ? 1 : 0),
-      sets: total.sets + sets.length,
-      volume: total.volume + volume,
-    };
-  }, { exercises: 0, sets: 0, volume: 0 });
-}
-
-function renderStrengthDraft() {
-  if (!state.strengthDraft.length) {
-    return `<div class="empty">Noch keine Übung im Training. Füge zuerst eine Übung hinzu, dann die Sätze.</div>`;
-  }
-
-  return `
-    <div class="strength-draft-list">
-      ${state.strengthDraft.map((exercise, exerciseIndex) => `
-        <div class="draft-exercise" data-exercise-index="${exerciseIndex}">
-          <div class="exercise-head">
-            ${field("Übung", `<input name="exercise_name" value="${attr(exercise.name)}">`)}
-            <button class="btn small danger" type="button" data-action="remove-draft-exercise" data-target-exercise-index="${exerciseIndex}">Entfernen</button>
-          </div>
-          <input type="hidden" name="exercise_id" value="${attr(exercise.exercise_id || "")}">
-          <div class="set-list" role="group" aria-label="Sätze">
-            <div class="set-row set-row-head" aria-hidden="true">
-              <span>Set</span>
-              <span>Gewicht</span>
-              <span>Wdh.</span>
-              <span></span>
-            </div>
-            ${(exercise.sets || []).map((set, setIndex) => `
-              <div class="set-row" data-set-index="${setIndex}">
-                <div class="set-number">${setIndex + 1}</div>
-                <label class="set-field">
-                  <span>kg</span>
-                  <input name="set_weight" type="number" min="0" step="0.5" value="${attr(set.weight_kg ?? "")}">
-                </label>
-                <label class="set-field">
-                  <span>Wdh.</span>
-                  <input name="set_reps" type="number" min="0" step="1" value="${attr(set.reps ?? "")}">
-                </label>
-                <button class="btn small danger" type="button" data-action="remove-draft-set" data-target-exercise-index="${exerciseIndex}" data-target-set-index="${setIndex}">Löschen</button>
-              </div>
-            `).join("")}
-          </div>
-          <div class="button-row">
-            <button class="btn small ghost" type="button" data-action="add-draft-set" data-target-exercise-index="${exerciseIndex}">Set hinzufügen</button>
-          </div>
-        </div>
-      `).join("")}
-    </div>
-  `;
-}
-
-function renderCardioWorkoutForm() {
-  return `
-    <form id="cardio-workout-form">
-      <div class="form-grid">
-        ${field("Datum", `<input type="date" name="date" value="${attr(todayKey())}" required>`)}
-        ${field("Name", `<input name="name" value="Laufband">`)}
-        ${field("Dauer Minuten", `<input id="cardio-duration" type="number" name="duration_min" min="0.1" step="1" required>`)}
-        ${field("Distanz km", `<input id="cardio-distance" type="number" name="distance_km" min="0" step="0.01">`)}
-        ${field("km/h", `<input id="cardio-speed" type="number" name="speed_kmh" min="0" step="0.1">`)}
-        ${field("Notiz", `<textarea name="notes"></textarea>`, "full")}
-      </div>
-      <button class="btn primary" type="submit">Cardio speichern</button>
-    </form>
-  `;
-}
-
-function renderOtherWorkoutForm() {
-  return `
-    <form id="other-workout-form">
-      <div class="form-grid">
-        ${field("Datum", `<input type="date" name="date" value="${attr(todayKey())}" required>`)}
-        ${field("Name", `<input name="name" value="Training">`)}
-        ${field("Dauer Minuten", `<input type="number" name="duration_min" min="0" step="1">`)}
-        ${field("Notiz", `<textarea name="notes"></textarea>`, "full")}
-      </div>
-      <button class="btn primary" type="submit">Training speichern</button>
-    </form>
-  `;
-}
-
-function renderExercisePresetForm() {
-  return `
-    <form id="exercise-preset-form">
-      <div class="form-grid">
-        ${field("Name", `<input name="name" required>`)}
-        ${field("Kategorie", `<input name="category" value="Kraft">`)}
-        ${field("Muskelgruppen", `<input name="muscle_groups" placeholder="Brust, Trizeps">`)}
-        ${field("Tracking", `
-          <select name="default_tracking">
-            <option value="weight_reps">Gewicht + Wiederholungen</option>
-            <option value="reps_only">Nur Wiederholungen</option>
-          </select>
-        `)}
-        ${field("Notiz", `<textarea name="notes"></textarea>`, "full")}
-      </div>
-      <button class="btn primary" type="submit">Übungs-Preset speichern</button>
-    </form>
-  `;
-}
-
-function renderExercisePresetList() {
-  if (!data.exercise_presets.length) return `<div class="empty">Noch keine Übungs-Presets.</div>`;
-
-  return `
-    <div class="list">
-      ${data.exercise_presets.map((exercise) => `
-        <div class="list-row">
-          <div>
-            <p class="list-row-title">${safe(exercise.name)}</p>
-            <p class="list-row-meta">${safe(exercise.category || "Kraft")} · ${(exercise.muscle_groups || []).map(safe).join(", ") || "keine Muskelgruppen"}</p>
-          </div>
-          <div class="list-actions">
-            <button class="btn small danger" type="button" data-action="delete-exercise-preset" data-id="${attr(exercise.id)}">Löschen</button>
-          </div>
-        </div>
-      `).join("")}
-    </div>
-  `;
-}
-
-function renderWorkoutList() {
-  const rows = [...data.workouts].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  if (!rows.length) return `<div class="empty">Noch keine Trainings.</div>`;
-
-  return `
-    <div class="list">
-      ${rows.map((workout) => `
-        <div class="list-row">
-          <div>
-            <p class="list-row-title">${formatDate(workout.date)} · ${safe(workout.name || workoutTypeLabel(workout.type))}</p>
-            <p class="list-row-meta">${workoutSummary(workout)}</p>
-          </div>
-          <div class="list-actions">
-            <button class="btn small danger" type="button" data-action="delete-workout" data-id="${attr(workout.id)}">Löschen</button>
-          </div>
-        </div>
-      `).join("")}
-    </div>
-  `;
-}
-
-function syncStrengthDraftFromDOM() {
-  const draftNodes = document.querySelectorAll(".draft-exercise[data-exercise-index]");
-  if (!draftNodes.length) return;
-
-  state.strengthDraft = [...draftNodes].map((node) => {
-    const sets = [...node.querySelectorAll(".set-row[data-set-index]")].map((setNode) => ({
-      weight_kg: setNode.querySelector("[name='set_weight']")?.value || "",
-      reps: setNode.querySelector("[name='set_reps']")?.value || "",
-    }));
-
-    return {
-      exercise_id: node.querySelector("[name='exercise_id']")?.value || "",
-      name: node.querySelector("[name='exercise_name']")?.value?.trim() || "",
-      sets,
-    };
-  });
-}
-
-function updateStrengthDraftSummaryFromDOM() {
-  const draftNodes = document.querySelectorAll(".draft-exercise[data-exercise-index]");
-  if (!draftNodes.length) return;
-
-  const stats = [...draftNodes].reduce((total, node) => {
-    const name = node.querySelector("[name='exercise_name']")?.value?.trim() || "";
-    const sets = [...node.querySelectorAll(".set-row[data-set-index]")].filter((setNode) => toNumber(setNode.querySelector("[name='set_reps']")?.value) > 0);
-    const volume = sets.reduce((sum, setNode) => {
-      const weight = toNumber(setNode.querySelector("[name='set_weight']")?.value) || 0;
-      const reps = toNumber(setNode.querySelector("[name='set_reps']")?.value) || 0;
-      return sum + (weight * reps);
-    }, 0);
-
-    return {
-      exercises: total.exercises + (name ? 1 : 0),
-      sets: total.sets + sets.length,
-      volume: total.volume + volume,
-    };
-  }, { exercises: 0, sets: 0, volume: 0 });
-
-  document.querySelector("[data-strength-stat='exercises']").textContent = fmt(stats.exercises, 0);
-  document.querySelector("[data-strength-stat='sets']").textContent = fmt(stats.sets, 0);
-  document.querySelector("[data-strength-stat='volume']").textContent = fmt(stats.volume, 0);
-}
-
-function addDraftExerciseFromForm() {
-  const presetId = document.querySelector("#draft-exercise-preset")?.value || "";
-  const manualName = document.querySelector("#draft-exercise-name")?.value?.trim() || "";
-  const preset = data.exercise_presets.find((exercise) => exercise.id === presetId);
-  const name = preset?.name || manualName;
-
-  if (!name) {
-    showToast("Bitte Übung wählen oder Namen eintragen.");
-    return;
-  }
-
-  state.strengthDraft.push({
-    exercise_id: preset?.id || slugId("exercise", name),
-    name,
-    sets: [{ weight_kg: "", reps: "" }],
-  });
-}
-
 function drawCharts() {
   document.querySelectorAll("[data-chart]").forEach((canvas) => {
     const chart = canvas.dataset.chart;
-    if (chart === "dashboard-weight" || chart === "weight-history") drawWeightChart(canvas);
-    if (chart === "calories-14") drawCaloriesChart(canvas);
-    if (chart === "training-weeks") drawTrainingChart(canvas);
+    if (chart === "dashboard-weight") drawDashboardWeightChart(canvas, data.weight_entries);
   });
   updatePresetPreview();
+
+  const scrollParent = document.querySelector("[data-chart-scroll='dashboard-weight']");
+  if (scrollParent) scrollParent.scrollLeft = scrollParent.scrollWidth;
 }
 
-function drawWeightChart(canvas) {
-  const entries = data.weight_entries.filter((entry) => toNumber(entry.weight_kg));
-  if (!entries.length) return drawEmptyChart(canvas, "Noch keine Gewichtsdaten");
+const WEIGHT_CHART_PX_PER_DAY = 6;
 
-  const points = entries.slice(-42).map((entry) => ({
-    label: entry.date.slice(5),
-    value: toNumber(entry.weight_kg),
-    avg: calculateMovingAverage(entries, 7, entry.date),
-  }));
+function drawDashboardWeightChart(canvas, weightEntries) {
+  const { points } = calculateWeightChartSeries(weightEntries);
+  if (!points.length) return drawEmptyChart(canvas, "Noch keine Gewichtsdaten");
 
-  drawLineChart(canvas, points, {
-    valueKey: "value",
-    secondKey: "avg",
-    color: "#55c7a1",
-    secondColor: "#73a7ff",
+  canvas.style.width = `${Math.max(points.length * WEIGHT_CHART_PX_PER_DAY, 220)}px`;
+
+  const { ctx, width, height } = setupCanvas(canvas);
+  const padding = { top: 18, right: 16, bottom: 28, left: 16 };
+  const values = points.flatMap((point) => [point.raw, point.avg]).filter((value) => value !== null);
+  const min = Math.min(...values) - 0.5;
+  const max = Math.max(...values) + 0.5;
+
+  const xForIndex = (index) => padding.left + (index / Math.max(points.length - 1, 1)) * (width - padding.left - padding.right);
+  const yForValue = (value) => height - padding.bottom - ((value - min) / Math.max(max - min, 1)) * (height - padding.top - padding.bottom);
+
+  ctx.clearRect(0, 0, width, height);
+  drawGrid(ctx, width, height, padding);
+
+  ctx.strokeStyle = "rgba(255,255,255,0.1)";
+  ctx.fillStyle = "#9eacbd";
+  ctx.font = "700 10px Inter, system-ui, sans-serif";
+  ctx.textAlign = "left";
+  let lastMonth = null;
+  points.forEach((point, index) => {
+    const month = point.date.slice(0, 7);
+    if (month === lastMonth) return;
+    lastMonth = month;
+    const x = xForIndex(index);
+    ctx.beginPath();
+    ctx.moveTo(x, padding.top);
+    ctx.lineTo(x, height - padding.bottom);
+    ctx.stroke();
+    ctx.fillText(formatMonthLabel(point.date), x + 3, height - 9);
   });
-}
 
-function drawCaloriesChart(canvas) {
-  const dates = lastNDays(todayKey(), 14);
-  const goal = data.settings.goals.calorie_goal_kcal;
-  const points = dates.map((date) => ({
-    label: date.slice(5),
-    value: calculateDailyNutrition(data.food_entries, date).calories_kcal,
-    goal,
-  }));
-
-  drawBarChart(canvas, points, { color: "#55c7a1", goalColor: "#f5b85b" });
-}
-
-function drawTrainingChart(canvas) {
-  const weekly = calculateWeeklyTrainingStats(data.workouts, todayKey()).byWeek.slice(-8);
-  if (!weekly.length) return drawEmptyChart(canvas, "Noch keine Trainingsdaten");
-  drawBarChart(canvas, weekly.map((week) => ({ label: week.label.replace("KW ", ""), value: week.total, goal: data.settings.goals.training_days_goal_per_week })), {
-    color: "#73a7ff",
-    goalColor: "#55c7a1",
+  ctx.fillStyle = "rgba(115, 167, 255, 0.5)";
+  points.forEach((point, index) => {
+    if (point.raw === null) return;
+    const x = xForIndex(index);
+    const y = yForValue(point.raw);
+    ctx.beginPath();
+    ctx.arc(x, y, 1.6, 0, Math.PI * 2);
+    ctx.fill();
   });
+
+  ctx.strokeStyle = "#55c7a1";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  let drawing = false;
+  points.forEach((point, index) => {
+    if (point.avg === null) {
+      drawing = false;
+      return;
+    }
+    const x = xForIndex(index);
+    const y = yForValue(point.avg);
+    if (!drawing) {
+      ctx.moveTo(x, y);
+      drawing = true;
+    } else {
+      ctx.lineTo(x, y);
+    }
+  });
+  ctx.stroke();
+}
+
+function formatMonthLabel(dateKey) {
+  const date = parseDateKey(dateKey);
+  if (!date) return "";
+  return new Intl.DateTimeFormat("de-CH", { month: "short", year: "2-digit" }).format(date);
 }
 
 function setupCanvas(canvas) {
@@ -2428,63 +1885,6 @@ function drawEmptyChart(canvas, text) {
   ctx.fillText(text, width / 2, height / 2);
 }
 
-function drawLineChart(canvas, points, options) {
-  const { ctx, width, height } = setupCanvas(canvas);
-  const padding = { top: 18, right: 12, bottom: 28, left: 34 };
-  const values = points.flatMap((point) => [point[options.valueKey], point[options.secondKey]]).filter((value) => value !== null && value !== undefined);
-  const min = Math.min(...values) - 0.5;
-  const max = Math.max(...values) + 0.5;
-
-  ctx.clearRect(0, 0, width, height);
-  drawGrid(ctx, width, height, padding);
-  drawSeries(ctx, points, options.valueKey, min, max, padding, width, height, options.color);
-  drawSeries(ctx, points, options.secondKey, min, max, padding, width, height, options.secondColor);
-  drawAxisLabels(ctx, points, width, height, padding);
-}
-
-function drawSeries(ctx, points, key, min, max, padding, width, height, color) {
-  ctx.beginPath();
-  points.forEach((point, index) => {
-    const value = point[key];
-    if (value === null || value === undefined) return;
-    const x = padding.left + (index / Math.max(points.length - 1, 1)) * (width - padding.left - padding.right);
-    const y = height - padding.bottom - ((value - min) / Math.max(max - min, 1)) * (height - padding.top - padding.bottom);
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2.5;
-  ctx.stroke();
-}
-
-function drawBarChart(canvas, points, options) {
-  const { ctx, width, height } = setupCanvas(canvas);
-  const padding = { top: 18, right: 12, bottom: 28, left: 34 };
-  const max = Math.max(1, ...points.map((point) => point.value || 0), ...points.map((point) => point.goal || 0));
-  const chartWidth = width - padding.left - padding.right;
-  const barWidth = chartWidth / points.length;
-
-  ctx.clearRect(0, 0, width, height);
-  drawGrid(ctx, width, height, padding);
-
-  points.forEach((point, index) => {
-    const x = padding.left + index * barWidth + barWidth * 0.18;
-    const barHeight = ((point.value || 0) / max) * (height - padding.top - padding.bottom);
-    const y = height - padding.bottom - barHeight;
-    ctx.fillStyle = options.color;
-    ctx.globalAlpha = 0.88;
-    ctx.fillRect(x, y, Math.max(barWidth * 0.64, 4), barHeight);
-    ctx.globalAlpha = 1;
-    if (point.goal) {
-      const goalY = height - padding.bottom - (point.goal / max) * (height - padding.top - padding.bottom);
-      ctx.fillStyle = options.goalColor;
-      ctx.fillRect(x, goalY, Math.max(barWidth * 0.64, 4), 2);
-    }
-  });
-
-  drawAxisLabels(ctx, points, width, height, padding);
-}
-
 function drawGrid(ctx, width, height, padding) {
   ctx.fillStyle = "rgba(255,255,255,0.035)";
   ctx.fillRect(0, 0, width, height);
@@ -2496,17 +1896,6 @@ function drawGrid(ctx, width, height, padding) {
     ctx.moveTo(padding.left, y);
     ctx.lineTo(width - padding.right, y);
     ctx.stroke();
-  }
-}
-
-function drawAxisLabels(ctx, points, width, height, padding) {
-  ctx.fillStyle = "#9eacbd";
-  ctx.font = "700 10px Inter, system-ui, sans-serif";
-  ctx.textAlign = "center";
-  const labels = points.length > 8 ? [0, Math.floor(points.length / 2), points.length - 1] : points.map((_, index) => index);
-  for (const index of labels) {
-    const x = padding.left + (index / Math.max(points.length - 1, 1)) * (width - padding.left - padding.right);
-    ctx.fillText(points[index]?.label || "", x, height - 9);
   }
 }
 
@@ -2528,6 +1917,126 @@ function updatePresetPreview() {
     <span class="pill">${fmt((toNumber(preset.carbs_g) || 0) * factor, 1)}g KH</span>
     <span class="pill">${fmt((toNumber(preset.fat_g) || 0) * factor, 1)}g Fett</span>
   `;
+}
+
+function updateBarcodeFormFromQuantity() {
+  if (!scannedProduct) return;
+  const quantity = toNumber(document.querySelector("#barcode-quantity")?.value) || 0;
+  const factor = quantity / 100;
+  const fields = {
+    "#barcode-calories": scannedProduct.caloriesPer100,
+    "#barcode-protein": scannedProduct.proteinPer100,
+    "#barcode-carbs": scannedProduct.carbsPer100,
+    "#barcode-fat": scannedProduct.fatPer100,
+  };
+  for (const [selector, per100] of Object.entries(fields)) {
+    const input = document.querySelector(selector);
+    if (input) input.value = round(per100 * factor, 1);
+  }
+}
+
+async function openBarcodeOverlay() {
+  const overlay = document.querySelector("#barcode-overlay");
+  const video = document.querySelector("#barcode-video");
+  const statusEl = document.querySelector("#barcode-status");
+  overlay.hidden = false;
+  statusEl.textContent = "Kamera wird gestartet...";
+
+  try {
+    if ("BarcodeDetector" in window) {
+      barcodeStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      video.srcObject = barcodeStream;
+      await video.play();
+      const detector = new BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e"] });
+      statusEl.textContent = "Barcode im Bild zentrieren...";
+
+      const scanLoop = async () => {
+        if (overlay.hidden) return;
+        try {
+          const codes = await detector.detect(video);
+          if (codes.length) {
+            await handleBarcodeDetected(codes[0].rawValue);
+            return;
+          }
+        } catch {
+          // Erkennung schlug für diesen Frame fehl, einfach weiter scannen.
+        }
+        barcodeAnimationFrame = requestAnimationFrame(scanLoop);
+      };
+      scanLoop();
+    } else {
+      await loadZXingScript();
+      statusEl.textContent = "Barcode im Bild zentrieren...";
+      const reader = new ZXingBrowser.BrowserMultiFormatReader();
+      zxingControls = await reader.decodeFromVideoDevice(undefined, video, (result) => {
+        if (result) handleBarcodeDetected(result.getText());
+      });
+    }
+  } catch (error) {
+    statusEl.textContent = `Kamera nicht verfügbar: ${error.message || "unbekannter Fehler"}`;
+  }
+}
+
+function closeBarcodeOverlay() {
+  const overlay = document.querySelector("#barcode-overlay");
+  overlay.hidden = true;
+
+  if (barcodeAnimationFrame) cancelAnimationFrame(barcodeAnimationFrame);
+  barcodeAnimationFrame = null;
+
+  if (zxingControls) {
+    zxingControls.stop();
+    zxingControls = null;
+  }
+
+  if (barcodeStream) {
+    barcodeStream.getTracks().forEach((track) => track.stop());
+    barcodeStream = null;
+  }
+
+  const video = document.querySelector("#barcode-video");
+  if (video) video.srcObject = null;
+}
+
+function loadZXingScript() {
+  if (window.ZXingBrowser) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/zxing-browser.min.js";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Barcode-Library konnte nicht geladen werden."));
+    document.head.appendChild(script);
+  });
+}
+
+async function handleBarcodeDetected(barcode) {
+  const statusEl = document.querySelector("#barcode-status");
+  statusEl.textContent = "Produkt wird gesucht...";
+
+  try {
+    const response = await fetch(`https://ch.openfoodfacts.org/api/v2/product/${encodeURIComponent(barcode)}.json`);
+    const payload = await response.json();
+    if (payload.status !== 1 || !payload.product) throw new Error("Produkt nicht gefunden.");
+
+    const product = payload.product;
+    const nutriments = product.nutriments || {};
+    const quantity = toNumber(product.product_quantity) || toNumber(parseFloat(product.serving_size)) || 100;
+
+    scannedProduct = {
+      name: product.product_name || "Gescanntes Produkt",
+      quantity,
+      caloriesPer100: toNumber(nutriments["energy-kcal_100g"]) || 0,
+      proteinPer100: toNumber(nutriments.proteins_100g) || 0,
+      carbsPer100: toNumber(nutriments.carbohydrates_100g) || 0,
+      fatPer100: toNumber(nutriments.fat_100g) || 0,
+    };
+
+    closeBarcodeOverlay();
+    state.caloriePanel = "barcode";
+    await render();
+  } catch (error) {
+    statusEl.textContent = error.message || "Produkt nicht gefunden.";
+  }
 }
 
 function autoFillCardio(changedId) {
@@ -2601,6 +2110,15 @@ function buildPresetFromValues(values) {
   };
 }
 
+function notificationFocusCheckbox(key, label, focus) {
+  return `
+    <label class="check-row">
+      <input type="checkbox" name="focus_${attr(key)}" ${focus?.[key] ? "checked" : ""}>
+      ${safe(label)}
+    </label>
+  `;
+}
+
 function field(label, control, className = "") {
   return `
     <label class="field ${className}">
@@ -2622,6 +2140,28 @@ function renderMetric(label, value, sub = "") {
 
 function renderMetricCard(label, value, sub = "") {
   return `<article class="card">${renderMetric(label, value, sub)}</article>`;
+}
+
+function renderBmiGauge(bmi) {
+  const scaleMin = 15;
+  const scaleMax = 35;
+  const zones = [
+    { className: "underweight", from: scaleMin, to: 18.5 },
+    { className: "normal", from: 18.5, to: 25 },
+    { className: "overweight", from: 25, to: 30 },
+    { className: "obese", from: 30, to: scaleMax },
+  ];
+  const value = toNumber(bmi);
+  const markerPercent = value !== null
+    ? Math.min(100, Math.max(0, ((value - scaleMin) / (scaleMax - scaleMin)) * 100))
+    : null;
+
+  return `
+    <div class="bmi-gauge">
+      ${zones.map((zone) => `<span class="bmi-gauge-zone ${zone.className}" style="width: ${((zone.to - zone.from) / (scaleMax - scaleMin)) * 100}%"></span>`).join("")}
+      ${markerPercent !== null ? `<span class="bmi-gauge-marker" style="left: ${markerPercent}%"></span>` : ""}
+    </div>
+  `;
 }
 
 function renderProgressRow(label, current, goal, unit, options = {}) {
@@ -2812,10 +2352,6 @@ function panelButton(panel, label) {
   return `<button class="btn ${state.caloriePanel === panel ? "primary" : "ghost"}" type="button" data-action="set-calorie-panel" data-panel="${attr(panel)}">${safe(label)}</button>`;
 }
 
-function workoutTypeButton(type, label) {
-  return `<button class="btn ${state.workoutType === type ? "is-active" : ""}" type="button" data-action="set-workout-type" data-type="${attr(type)}">${safe(label)}</button>`;
-}
-
 function mealSelect(name, selected = "") {
   return `
     <select name="${attr(name)}">
@@ -2840,26 +2376,6 @@ function option(value, label, selected) {
 function presetTypeLabel(preset) {
   if (preset.type === "ingredient_100g") return `pro ${fmt(preset.base_quantity, 0)}${preset.unit || "g"}`;
   return `pro ${fmt(preset.base_quantity, 0)} ${preset.unit || "Stück"}`;
-}
-
-function measurementSummary(entry) {
-  const parts = [];
-  if (entry.waist_cm) parts.push(`Bauch ${fmt(entry.waist_cm, 1)} cm`);
-  if (entry.neck_cm) parts.push(`Hals ${fmt(entry.neck_cm, 1)} cm`);
-  if (entry.hip_cm) parts.push(`Hüfte ${fmt(entry.hip_cm, 1)} cm`);
-  return parts.join(" · ") || "Keine Umfänge";
-}
-
-function workoutSummary(workout) {
-  if (workout.type === "strength") {
-    const volume = calculateStrengthWorkoutVolume(workout);
-    const exerciseCount = workout.exercises?.length || 0;
-    return `Kraft · ${exerciseCount} Übungen · ${fmt(volume, 0)} kg Volumen${workout.duration_min ? ` · ${fmt(workout.duration_min, 0)} min` : ""}`;
-  }
-  if (workout.type === "cardio") {
-    return `Cardio · ${fmt(workout.duration_min, 0)} min${workout.distance_km ? ` · ${fmt(workout.distance_km, 2)} km` : ""}${workout.speed_kmh ? ` · ${fmt(workout.speed_kmh, 1)} km/h` : ""}`;
-  }
-  return `Sonstiges${workout.duration_min ? ` · ${fmt(workout.duration_min, 0)} min` : ""}`;
 }
 
 function workoutTypeLabel(type) {

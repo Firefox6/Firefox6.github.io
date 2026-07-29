@@ -484,6 +484,50 @@ h3 {
   background: linear-gradient(90deg, var(--accent), var(--accent-2));
 }
 
+.bmi-gauge {
+  position: relative;
+  display: flex;
+  height: 10px;
+  border-radius: 999px;
+  overflow: visible;
+}
+
+.bmi-gauge-zone {
+  height: 100%;
+}
+
+.bmi-gauge-zone:first-child {
+  border-radius: 999px 0 0 999px;
+}
+
+.bmi-gauge-zone:last-child {
+  border-radius: 0 999px 999px 0;
+}
+
+.bmi-gauge-zone.underweight,
+.bmi-gauge-zone.overweight {
+  background: color-mix(in srgb, var(--warn) 55%, var(--surface-3));
+}
+
+.bmi-gauge-zone.normal {
+  background: color-mix(in srgb, var(--ok) 55%, var(--surface-3));
+}
+
+.bmi-gauge-zone.obese {
+  background: color-mix(in srgb, var(--danger) 55%, var(--surface-3));
+}
+
+.bmi-gauge-marker {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 0 0 3px var(--bg), 0 2px 6px rgba(0, 0, 0, 0.35);
+  transform: translate(-50%, -50%);
+}
+
 .nutrient-list {
   display: grid;
   gap: 8px;
@@ -844,6 +888,17 @@ form > button {
   background: var(--surface-2);
 }
 
+.chart-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--radius);
+}
+
+.chart-scroll .chart-canvas {
+  display: block;
+  min-width: 100%;
+}
+
 .big-number {
   color: var(--text);
   font-size: clamp(2rem, 6vw, 3.4rem);
@@ -895,6 +950,32 @@ form > button {
 .toast.is-visible {
   opacity: 1;
   transform: translateY(0);
+}
+
+.barcode-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+}
+
+.barcode-overlay-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  padding-top: calc(14px + env(safe-area-inset-top, 0px));
+  color: #fff;
+}
+
+.barcode-video {
+  flex: 1;
+  width: 100%;
+  object-fit: cover;
+  background: #000;
 }
 
 .update-banner {

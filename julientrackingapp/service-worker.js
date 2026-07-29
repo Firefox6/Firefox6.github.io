@@ -1,4 +1,4 @@
-const APP_VERSION = "2026-06-03-pwa-safe-updates";
+const APP_VERSION = "2026-07-29-concept-update";
 const APP_CACHE = `fittrack-app-shell-${APP_VERSION}`;
 const APP_CACHE_PREFIX = "fittrack-app-shell-";
 
