@@ -176,6 +176,7 @@ h3 {
 
 .screen-stack {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
 }
 
@@ -718,7 +719,7 @@ h3 {
   grid-column: 1 / -1;
 }
 
-input,
+input:not([type="checkbox"]):not([type="radio"]),
 select,
 textarea {
   width: 100%;
@@ -729,6 +730,15 @@ textarea {
   color: var(--text);
   padding: 9px 11px;
   outline: none;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
 }
 
 textarea {

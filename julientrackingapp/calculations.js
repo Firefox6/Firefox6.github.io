@@ -228,10 +228,11 @@ export function calculateWeeklyCaloriePool(foodEntries, calorieGoal, referenceDa
   const isoDay = referenceDate.getDay() === 0 ? 7 : referenceDate.getDay();
   const monday = addDays(referenceDate, -(isoDay - 1));
   const weekStartDate = formatDateKey(monday);
+  const lastCompletedDate = addDays(referenceDate, -1);
 
   let pool = 0;
   let cursor = monday;
-  while (cursor <= referenceDate) {
+  while (cursor <= lastCompletedDate) {
     const dateKey = formatDateKey(cursor);
     const consumed = calculateDailyNutrition(foodEntries, dateKey).calories_kcal;
     const delta = goal - consumed;

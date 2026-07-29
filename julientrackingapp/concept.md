@@ -1,4 +1,4 @@
-# Julien Tracking App – Concept.md
+# FitTrack – Concept.md
 
 ## Ziel
 
@@ -1069,7 +1069,7 @@ Alle Datenobjekte müssen deshalb haben:
   "schema_version": 1,
   "exported_at": "2026-05-06T12:00:00+02:00",
   "app": {
-    "name": "Julien Tracking",
+    "name": "FitTrack",
     "version": "1.0.0"
   },
   "settings": {

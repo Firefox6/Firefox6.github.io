@@ -1,4 +1,4 @@
-const APP_VERSION = "2026-07-29-concept-update";
+const APP_VERSION = "2026-07-29-fixes-round2";
 const APP_CACHE = `fittrack-app-shell-${APP_VERSION}`;
 const APP_CACHE_PREFIX = "fittrack-app-shell-";
 
@@ -13,6 +13,8 @@ const CORE_ASSETS = [
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
+  "./icons/icon-maskable-192.png",
+  "./icons/icon-maskable-512.png",
   "./icons/apple-touch-icon.png",
 ];
 

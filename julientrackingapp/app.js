@@ -222,13 +222,14 @@ function renderDashboardV2() {
   const weightStats = buildWeightStats();
   const trainingStats = calculateWeeklyTrainingStats(data.workouts, today).thisWeek;
   const avgCalories7 = average(lastNDays(today, 7).map((date) => calculateDailyNutrition(data.food_entries, date).calories_kcal));
-  const calorieProgress = percent(nutrition.calories_kcal, goals.calorie_goal_kcal);
+  const caloriePool = calculateWeeklyCaloriePool(data.food_entries, goals.calorie_goal_kcal, today).pool;
+  const effectiveCalorieGoal = (toNumber(goals.calorie_goal_kcal) || 0) + caloriePool;
+  const calorieProgress = percent(nutrition.calories_kcal, effectiveCalorieGoal);
   const proteinProgress = percent(nutrition.protein_g, goals.protein_goal_g);
   const proteinOpen = Math.max((toNumber(goals.protein_goal_g) || 0) - (toNumber(nutrition.protein_g) || 0), 0);
-  const calorieOpen = (toNumber(goals.calorie_goal_kcal) || 0) - (toNumber(nutrition.calories_kcal) || 0);
+  const calorieOpen = effectiveCalorieGoal - (toNumber(nutrition.calories_kcal) || 0);
   const ringProgress = Math.min(Math.max(calorieProgress, 0), 100);
   const proteinRingProgress = Math.min(Math.max(proteinProgress, 0), 100);
-  const caloriePool = calculateWeeklyCaloriePool(data.food_entries, goals.calorie_goal_kcal, today).pool;
   const autoTdee = calculateAutoTdee(data.weight_entries, data.food_entries, today);
 
   return `
@@ -259,7 +260,7 @@ function renderDashboardV2() {
         <div class="today-quick-grid">
           <div class="quick-stat">
             <span>Kalorien</span>
-            <strong>${fmt(nutrition.calories_kcal, 0)} / ${fmt(goals.calorie_goal_kcal, 0)}</strong>
+            <strong>${fmt(nutrition.calories_kcal, 0)} / ${fmt(effectiveCalorieGoal, 0)}</strong>
           </div>
           <div class="quick-stat">
             <span>Protein offen</span>
@@ -268,22 +269,10 @@ function renderDashboardV2() {
         </div>
 
         <div class="today-actions" style="position: relative; z-index: 1; margin-top: 18px;">
-          <span class="pill ${caloriePillClass(nutrition.calories_kcal, goals.calorie_goal_kcal)}">${calorieBalanceText(nutrition.calories_kcal, goals.calorie_goal_kcal)}</span>
-          <button class="btn small primary" type="button" data-action="copy-chatgpt-daily-context">ChatGPT</button>
+          <span class="pill ${caloriePillClass(nutrition.calories_kcal, effectiveCalorieGoal)}">${calorieBalanceText(nutrition.calories_kcal, effectiveCalorieGoal)}</span>
+          <button class="btn small primary" type="button" data-action="copy-chatgpt-daily-context">Heute exportieren</button>
         </div>
       </article>
-    </section>
-
-    <section class="card">
-      <div class="section-head">
-        <div>
-          <h2>Gewichtsverlauf</h2>
-          <p class="section-note">Tagesgewicht (schwach) und 7-Tage-Schnitt (kräftig). Zum Scrollen wischen.</p>
-        </div>
-      </div>
-      <div class="chart-scroll" data-chart-scroll="dashboard-weight">
-        <canvas class="chart-canvas" data-chart="dashboard-weight" aria-label="Gewichtsverlauf mit 7-Tage-Schnitt"></canvas>
-      </div>
     </section>
 
     <section class="dashboard-flow">
@@ -296,7 +285,7 @@ function renderDashboardV2() {
           <span class="pill ${caloriePool > 0 ? "ok" : ""}">${caloriePool > 0 ? "+" : ""}${fmt(caloriePool, 0)} kcal Pool</span>
         </div>
         <div class="primary-progress-grid">
-          ${renderProgressRow("Kalorien", nutrition.calories_kcal, goals.calorie_goal_kcal, "kcal", { kind: "calories" })}
+          ${renderProgressRow("Kalorien", nutrition.calories_kcal, effectiveCalorieGoal, "kcal", { kind: "calories" })}
           ${renderProgressRow("Protein", nutrition.protein_g, goals.protein_goal_g, "g", { kind: "protein" })}
         </div>
         <p class="section-note" style="margin-top: 10px;">${autoTdee.available ? `Dein berechneter Ø Verbrauch (letzte 21 Tage) liegt bei ca. ${fmt(autoTdee.tdee, 0)} kcal.` : "Noch nicht genug Daten für einen berechneten Verbrauch (Gewicht und Kalorien über mehrere Wochen erfassen)."}</p>
@@ -330,6 +319,18 @@ function renderDashboardV2() {
       ${renderMetricCard("Aktuell", weightStats.latest ? `${fmt(weightStats.latest.weight_kg, 1)} kg` : "-", weightStats.latest ? formatDate(weightStats.latest.date) : "Noch kein Eintrag")}
       ${renderMetricCard("Seit Start", weightStats.diffStart !== null ? `${fmtSigned(weightStats.diffStart, 1)} kg` : "-", "Gewicht")}
     </section>
+
+    <section class="card">
+      <div class="section-head">
+        <div>
+          <h2>Gewichtsverlauf</h2>
+          <p class="section-note">Tagesgewicht (schwach) und 7-Tage-Schnitt (kräftig). Zum Scrollen wischen.</p>
+        </div>
+      </div>
+      <div class="chart-scroll" data-chart-scroll="dashboard-weight">
+        <canvas class="chart-canvas" data-chart="dashboard-weight" aria-label="Gewichtsverlauf mit 7-Tage-Schnitt"></canvas>
+      </div>
+    </section>
   `;
 }
 function renderCaloriesV2() {
@@ -338,6 +339,9 @@ function renderCaloriesV2() {
   const weightStats = buildWeightStats();
   const proteinPerKg = weightStats.trendWeight ? nutrition.protein_g / weightStats.trendWeight : null;
   const maintenance = calculateMaintenanceDelta(nutrition.calories_kcal, data.settings.maintenance.min_kcal, data.settings.maintenance.max_kcal);
+  const isToday = state.selectedDate === todayKey();
+  const caloriePool = isToday ? calculateWeeklyCaloriePool(data.food_entries, goals.calorie_goal_kcal, todayKey()).pool : 0;
+  const effectiveCalorieGoal = (toNumber(goals.calorie_goal_kcal) || 0) + caloriePool;
 
   return `
     <section class="card">
@@ -365,13 +369,13 @@ function renderCaloriesV2() {
         </div>
       </div>
       <div class="grid two">
-        ${renderMetric("Kcal", goalValueText(nutrition.calories_kcal, goals.calorie_goal_kcal, "kcal", 0), calorieBalanceText(nutrition.calories_kcal, goals.calorie_goal_kcal))}
+        ${renderMetric("Kcal", goalValueText(nutrition.calories_kcal, effectiveCalorieGoal, "kcal", 0), calorieBalanceText(nutrition.calories_kcal, effectiveCalorieGoal))}
         ${renderMetric("Protein", goalValueText(nutrition.protein_g, goals.protein_goal_g, "g", 0), proteinPerKg ? `${fmt(proteinPerKg, 2)} g/kg` : "Gewicht fehlt")}
         ${renderMetric("KH", goalValueText(nutrition.carbs_g, goals.carbs_goal_g, "g", 0), optionalGoalSub(nutrition.carbs_g, goals.carbs_goal_g))}
         ${renderMetric("Fett", goalValueText(nutrition.fat_g, goals.fat_goal_g, "g", 0), optionalGoalSub(nutrition.fat_g, goals.fat_goal_g))}
       </div>
       <div class="screen-stack" style="margin-top: 14px;">
-        ${renderProgressRow("Kalorien", nutrition.calories_kcal, goals.calorie_goal_kcal, "kcal", { kind: "calories" })}
+        ${renderProgressRow("Kalorien", nutrition.calories_kcal, effectiveCalorieGoal, "kcal", { kind: "calories" })}
         ${renderProgressRow("Protein", nutrition.protein_g, goals.protein_goal_g, "g", { kind: "protein" })}
         ${nutrition.hasOptional ? renderOptionalNutrition(nutrition) : ""}
       </div>
@@ -778,6 +782,10 @@ async function handleChange(event) {
       document.querySelector("#quick-preset-fields")?.toggleAttribute("hidden", !target.checked);
     }
 
+    if (target.id === "barcode-save-preset") {
+      document.querySelector("#barcode-preset-fields")?.toggleAttribute("hidden", !target.checked);
+    }
+
     if (target.id === "food-preset-type") {
       applyPresetTypeDefaults(target.value);
     }
@@ -949,12 +957,13 @@ async function saveBarcodeFood(form) {
 
   let presetId = null;
   if (form.elements.namedItem("barcode_save_preset")?.checked) {
-    const factor = 100 / quantity;
+    const baseQuantity = optionalNumber(form, "preset_base_quantity") || 100;
+    const factor = baseQuantity / quantity;
     const preset = buildPresetFromValues({
       name,
-      type: "ingredient_100g",
-      unit: "g",
-      base_quantity: 100,
+      type: formValue(form, "preset_type") || "ingredient_100g",
+      unit: formValue(form, "preset_unit") || "g",
+      base_quantity: baseQuantity,
       calories_kcal: round(entry.calories_kcal * factor, 1),
       protein_g: round(entry.protein_g * factor, 1),
       carbs_g: round(entry.carbs_g * factor, 1),
@@ -1657,12 +1666,20 @@ function renderBarcodeScanForm() {
         ${field("Protein g", `<input id="barcode-protein" type="number" name="protein_g" min="0" step="0.1" value="${attr(round(scannedProduct.proteinPer100 * factor, 1))}">`)}
         ${field("KH g", `<input id="barcode-carbs" type="number" name="carbs_g" min="0" step="0.1" value="${attr(round(scannedProduct.carbsPer100 * factor, 1))}">`)}
         ${field("Fett g", `<input id="barcode-fat" type="number" name="fat_g" min="0" step="0.1" value="${attr(round(scannedProduct.fatPer100 * factor, 1))}">`)}
+        ${field("Ballaststoffe g", `<input id="barcode-fiber" type="number" name="fiber_g" min="0" step="0.1" value="${attr(round(scannedProduct.fiberPer100 * factor, 1))}">`)}
+        ${field("Zucker g", `<input id="barcode-sugar" type="number" name="sugar_g" min="0" step="0.1" value="${attr(round(scannedProduct.sugarPer100 * factor, 1))}">`)}
+        ${field("Salz g", `<input id="barcode-salt" type="number" name="salt_g" min="0" step="0.1" value="${attr(round(scannedProduct.saltPer100 * factor, 1))}">`)}
         ${field("Notiz", `<textarea name="notes"></textarea>`, "full")}
       </div>
       <label class="check-row">
-        <input type="checkbox" name="barcode_save_preset">
+        <input id="barcode-save-preset" type="checkbox" name="barcode_save_preset">
         Als Preset speichern
       </label>
+      <div id="barcode-preset-fields" class="form-grid" hidden>
+        ${field("Preset-Typ", presetTypeSelect("preset_type"))}
+        ${field("Einheit", `<input name="preset_unit" value="g">`)}
+        ${field("Basis-Menge", `<input type="number" name="preset_base_quantity" min="0.01" step="0.01" value="100">`)}
+      </div>
       <div class="button-row" style="margin-top: 10px;">
         <button class="btn primary" type="submit">Eintragen</button>
         <button class="btn ghost" type="button" data-action="cancel-barcode-scan">Neu scannen</button>
@@ -1928,6 +1945,9 @@ function updateBarcodeFormFromQuantity() {
     "#barcode-protein": scannedProduct.proteinPer100,
     "#barcode-carbs": scannedProduct.carbsPer100,
     "#barcode-fat": scannedProduct.fatPer100,
+    "#barcode-fiber": scannedProduct.fiberPer100,
+    "#barcode-sugar": scannedProduct.sugarPer100,
+    "#barcode-salt": scannedProduct.saltPer100,
   };
   for (const [selector, per100] of Object.entries(fields)) {
     const input = document.querySelector(selector);
@@ -2029,6 +2049,9 @@ async function handleBarcodeDetected(barcode) {
       proteinPer100: toNumber(nutriments.proteins_100g) || 0,
       carbsPer100: toNumber(nutriments.carbohydrates_100g) || 0,
       fatPer100: toNumber(nutriments.fat_100g) || 0,
+      fiberPer100: toNumber(nutriments.fiber_100g) || 0,
+      sugarPer100: toNumber(nutriments.sugars_100g) || 0,
+      saltPer100: toNumber(nutriments.salt_100g) || 0,
     };
 
     closeBarcodeOverlay();
