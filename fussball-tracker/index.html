@@ -3,11 +3,27 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
-<title>Fussball Tracker — Mbappé · FC Basel · SRF Sport</title>
-<meta name="description" content="Persönlicher Fussball-Tracker: Mbappé, FC Basel und alle gratis Live-Spiele auf SRF Sport." />
+<title>Fussball Tracker</title>
+<meta name="description" content="Persönlicher Fussball-Tracker: Spieler, Klub und alle gratis Live-Spiele — mit eigenem Datensatz aktualisierbar." />
 
 <meta name="theme-color" content="#0b0e14" />
-<meta name="color-scheme" content="dark" />
+<meta name="color-scheme" content="dark light" />
+<script>
+  // Theme so früh wie möglich setzen, bevor irgendetwas gerendert wird —
+  // verhindert einen kurzen Flash im falschen Farbschema. Schlüssel muss
+  // exakt zu Store.LS_THEME_KEY in js/store.js passen.
+  (function () {
+    try {
+      if (localStorage.getItem("fussballtracker.theme") === "light") {
+        document.documentElement.setAttribute("data-theme", "light");
+        var m = document.querySelector('meta[name="theme-color"]');
+        if (m) m.setAttribute("content", "#eef0f4");
+      }
+    } catch (e) {
+      /* localStorage nicht verfügbar (z.B. privates Fenster) — Default bleibt dunkel */
+    }
+  })();
+</script>
 <link rel="manifest" href="manifest.json" />
 <link rel="icon" href="icons/favicon-64.png" />
 <link rel="apple-touch-icon" href="icons/icon-192.png" />
@@ -30,24 +46,29 @@
   <main id="main-content" aria-live="polite"></main>
 
   <nav class="tabbar" aria-label="Hauptnavigation">
-    <button data-tab="home" class="active" aria-current="page">
+    <button type="button" data-tab="home" class="active" aria-current="page">
       <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 11.5 12 4l9 7.5"/><path stroke-linecap="round" stroke-linejoin="round" d="M5.5 10v9a1 1 0 0 0 1 1H10v-6h4v6h3.5a1 1 0 0 0 1-1v-9"/></svg>
       <span>Start</span>
       <span class="tab-underline"></span>
     </button>
-    <button data-tab="mbappe">
+    <button type="button" data-tab="player">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="7" r="3.2"/><path stroke-linecap="round" stroke-linejoin="round" d="M5.5 21c0-4 3-6.5 6.5-6.5s6.5 2.5 6.5 6.5"/></svg>
       <span>Mbappé</span>
       <span class="tab-underline"></span>
     </button>
-    <button data-tab="basel">
+    <button type="button" data-tab="club">
       <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3 5 6v5c0 5 3 8.5 7 10 4-1.5 7-5 7-10V6l-7-3Z"/></svg>
-      <span>FC Basel</span>
+      <span>Basel</span>
       <span class="tab-underline"></span>
     </button>
-    <button data-tab="srf">
+    <button type="button" data-tab="broadcaster">
       <svg viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="12" rx="1.6"/><path stroke-linecap="round" d="M9 20.5h6M12 17.5v3"/></svg>
-      <span>SRF Sport</span>
+      <span>SRF</span>
+      <span class="tab-underline"></span>
+    </button>
+    <button type="button" data-tab="settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path stroke-linecap="round" stroke-linejoin="round" d="M19.4 13.5a7.6 7.6 0 0 0 0-3l1.9-1.4-2-3.4-2.2.7a7.7 7.7 0 0 0-2.6-1.5L14 2.5h-4l-.5 2.4a7.7 7.7 0 0 0-2.6 1.5l-2.2-.7-2 3.4L4.6 10.5a7.6 7.6 0 0 0 0 3L2.7 15l2 3.4 2.2-.7a7.7 7.7 0 0 0 2.6 1.5l.5 2.3h4l.5-2.3a7.7 7.7 0 0 0 2.6-1.5l2.2.7 2-3.4-1.9-1.4Z"/></svg>
+      <span>Mehr</span>
       <span class="tab-underline"></span>
     </button>
   </nav>
@@ -55,6 +76,7 @@
 </div>
 
 <script src="js/data.js"></script>
+<script src="js/store.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

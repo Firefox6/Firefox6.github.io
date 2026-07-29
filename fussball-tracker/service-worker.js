@@ -1,19 +1,21 @@
 /**
  * service-worker.js — Fussball Tracker
- * App-Shell-Caching: die App startet offline, Daten sind statisch (data.js)
- * und werden bei jedem Deploy mit hochgeladen.
+ * App-Shell-Caching: die App startet offline. Inhalte kommen entweder aus
+ * dem mitgelieferten data.js oder aus einem importierten Datensatz in
+ * localStorage (siehe store.js) — beides braucht kein Netzwerk.
  *
  * Bump CACHE_VERSION, wenn Dateien geändert werden, damit Clients das
  * Update laden.
  */
 
-const CACHE_VERSION = "fussball-tracker-v1";
+const CACHE_VERSION = "fussball-tracker-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./manifest.json",
   "./css/style.css",
   "./js/app.js",
+  "./js/store.js",
   "./js/data.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
@@ -43,15 +45,15 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-// Cache-first for the app shell, falling back to network; network requests
-// that succeed are stashed into the cache so the next offline launch has
-// the latest copy too (stale-while-revalidate style for same-origin GETs).
+// Cache-first für die App-Shell, mit Netzwerk-Fallback; erfolgreiche
+// Netzwerk-Antworten werden nachträglich im Cache abgelegt (stale-while-
+// revalidate für same-origin GETs).
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
 
   const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return; // don't intercept cross-origin
+  if (url.origin !== self.location.origin) return; // keine Cross-Origin-Requests abfangen
 
   event.respondWith(
     caches.match(req).then((cached) => {

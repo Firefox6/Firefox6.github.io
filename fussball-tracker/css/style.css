@@ -1,8 +1,11 @@
 /* =========================================================================
    Fussball Tracker — Design Tokens
    Konzept: Schweizer Bahnhofstafel / Split-Flap-Anzeigetafel.
-   Zahlen (Resultate, Countdown, Statistiken) erscheinen wie auf einer
-   Klapptafel; Labels wirken wie Gate-/Status-Beschriftungen.
+   Dark  = beleuchtete Anzeigetafel bei Nacht (Standard).
+   Light = dieselbe Tafel bei Tageslicht — gleiches Konzept, hellere Karten.
+   Layout: Bottom-Tab-Bar auf schmalen/hohen Screens (Handy, Z-Fold-Cover),
+   seitliche Nav-Rail ab ~600px (aufgeklapptes Fold, Tablet) — dort ist
+   Breite reichlich vorhanden, Höhe knapper, darum keine Bottom-Bar dort.
    ========================================================================= */
 
 :root {
@@ -25,6 +28,8 @@
   --green: #22c55e;
   --green-dim: rgba(34, 197, 94, 0.16);
 
+  --shadow-card: none;
+
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 
@@ -32,9 +37,38 @@
   --radius-md: 12px;
   --radius-sm: 8px;
 
+  --nav-w: 96px;
   --nav-h: 64px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top: env(safe-area-inset-top, 0px);
+
+  color-scheme: dark;
+}
+
+/* --- Light theme: gleiche Tafel, Tageslicht --- */
+:root[data-theme="light"] {
+  --void: #eef0f4;
+  --panel: #ffffff;
+  --panel-raised: #f2f4f8;
+  --card-top: #ffffff;
+  --card-bot: #e3e6ed;
+  --hairline: rgba(18, 22, 31, 0.1);
+  --hairline-strong: rgba(18, 22, 31, 0.18);
+
+  --cream: #14181f;
+  --cream-dim: rgba(20, 24, 31, 0.68);
+  --cream-faint: rgba(20, 24, 31, 0.46);
+
+  --red: #c11f1f;
+  --red-dim: rgba(193, 31, 31, 0.12);
+  --blue: #2547b8;
+  --blue-dim: rgba(37, 71, 184, 0.12);
+  --green: #16893f;
+  --green-dim: rgba(22, 137, 63, 0.12);
+
+  --shadow-card: 0 1px 2px rgba(20, 24, 31, 0.05), 0 2px 8px rgba(20, 24, 31, 0.05);
+
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -47,6 +81,8 @@ html, body {
   font-family: var(--font-sans);
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
+  transition: background-color 0.2s ease, color 0.2s ease;
+  overflow-x: hidden; /* Sicherheitsnetz gegen ungewollten horizontalen Scroll */
 }
 
 body {
@@ -69,7 +105,8 @@ button {
   cursor: pointer;
 }
 button:focus-visible,
-a:focus-visible {
+a:focus-visible,
+input:focus-visible {
   outline: 2px solid var(--red);
   outline-offset: 2px;
 }
@@ -116,6 +153,7 @@ a { color: inherit; }
   border-radius: 50%;
   background: var(--green);
   box-shadow: 0 0 0 3px var(--green-dim);
+  flex-shrink: 0;
 }
 
 .topbar h1 {
@@ -123,6 +161,9 @@ a { color: inherit; }
   font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 main {
@@ -133,7 +174,7 @@ main {
   margin: 0 auto;
 }
 
-/* Bottom tab bar */
+/* Bottom tab bar (phone / Z-Fold cover screen) */
 .tabbar {
   position: fixed;
   bottom: 0;
@@ -144,7 +185,7 @@ main {
   background: var(--panel);
   border-top: 1px solid var(--hairline);
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   z-index: 10;
 }
 
@@ -155,37 +196,52 @@ main {
   justify-content: center;
   gap: 4px;
   color: var(--cream-faint);
-  font-size: 11px;
-  letter-spacing: 0.02em;
+  font-size: 10.5px;
+  letter-spacing: 0.01em;
   transition: color 0.15s ease;
+  min-width: 0;
 }
 
 .tabbar button svg {
-  width: 22px;
-  height: 22px;
+  width: 21px;
+  height: 21px;
   stroke: currentColor;
   fill: none;
   stroke-width: 1.8;
+  flex-shrink: 0;
 }
 
-.tabbar button.active {
-  color: var(--cream);
-}
+.tabbar button.active { color: var(--cream); }
+.tabbar button.active svg { stroke: var(--red); }
 
-.tabbar button.active svg {
-  stroke: var(--red);
+.tabbar button span:not(.tab-underline) {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 2px;
 }
 
 .tabbar button .tab-underline {
-  width: 18px;
+  width: 16px;
   height: 2px;
   border-radius: 2px;
   background: transparent;
   margin-top: 1px;
 }
 
-.tabbar button.active .tab-underline {
-  background: var(--red);
+.tabbar button.active .tab-underline { background: var(--red); }
+
+/* Extra Luft auf sehr hohen, schmalen Screens (z.B. Fold-Aussendisplay
+   ~344px, aber auch reguläre schmale Phones treffen diese Aspect-Ratio) */
+@media (max-width: 400px) and (max-aspect-ratio: 1/2) {
+  .tabbar button { padding: 6px 0 4px; }
+  main { padding-top: 20px; padding-left: 12px; padding-right: 12px; }
+  .chip-row { grid-template-columns: 1fr; }
+  .detail-list { grid-template-columns: 1fr; }
+  .flip-card { width: 19px; height: 27px; }
+  .flip-face { font-size: 14px; }
+  .flip-group { gap: 3px; }
 }
 
 /* ---------------------------------------------------------------------
@@ -200,7 +256,6 @@ main {
   color: var(--cream-faint);
   margin: 28px 4px 10px;
 }
-
 .section-label:first-child { margin-top: 4px; }
 
 .card {
@@ -209,11 +264,15 @@ main {
   border-radius: var(--radius-lg);
   padding: 16px;
   margin-bottom: 12px;
+  box-shadow: var(--shadow-card);
 }
-
 .card + .section-label { margin-top: 28px; }
 
-/* Board row — departure-board style list item for matches */
+.match-list {
+  display: block;
+}
+
+/* Board row — departure-board style list item for upcoming matches */
 .board-row {
   display: grid;
   grid-template-columns: 40px 1fr auto;
@@ -224,6 +283,7 @@ main {
   background: var(--panel);
   border: 1px solid var(--hairline);
   margin-bottom: 8px;
+  box-shadow: var(--shadow-card);
 }
 
 .board-row .crest {
@@ -239,19 +299,26 @@ main {
   font-size: 13px;
   color: var(--cream-dim);
   border: 1px solid var(--hairline-strong);
+  flex-shrink: 0;
 }
 
+.board-row .info { min-width: 0; }
 .board-row .info .opponent {
   font-weight: 600;
   font-size: 15px;
   margin: 0 0 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-
 .board-row .info .meta {
   font-family: var(--font-mono);
   font-size: 11.5px;
   color: var(--cream-faint);
   letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .board-row .side {
@@ -260,15 +327,14 @@ main {
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
+  flex-shrink: 0;
 }
-
 .board-row .side .time {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 15px;
   font-weight: 600;
 }
-
 .board-row .side .date {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -287,25 +353,13 @@ main {
   gap: 4px;
   white-space: nowrap;
 }
-
-.badge.free {
-  background: var(--green-dim);
-  color: var(--green);
-}
+.badge.free { background: var(--green-dim); color: var(--green); }
 .badge.free::before {
   content: "";
   width: 5px;
   height: 5px;
   border-radius: 50%;
   background: var(--green);
-}
-
-.badge.score {
-  background: var(--panel-raised);
-  color: var(--cream);
-  font-size: 12px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
 }
 
 /* Result row (past matches) */
@@ -315,6 +369,7 @@ main {
   background: var(--panel);
   border: 1px solid var(--hairline);
   margin-bottom: 8px;
+  box-shadow: var(--shadow-card);
 }
 .result-row .top-line {
   display: flex;
@@ -323,52 +378,24 @@ main {
   gap: 10px;
   margin-bottom: 4px;
 }
-.result-row .fixture {
-  font-weight: 600;
-  font-size: 14.5px;
-}
+.result-row .fixture { font-weight: 600; font-size: 14.5px; }
 .result-row .comp {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--cream-faint);
   margin-bottom: 6px;
 }
-.result-row .note {
-  font-size: 13px;
-  color: var(--cream-dim);
-  line-height: 1.45;
-}
-.result-row .goal-chip {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--red);
-  font-weight: 700;
-}
+.result-row .note { font-size: 13px; color: var(--cream-dim); line-height: 1.45; }
+.result-row .goal-chip { font-family: var(--font-mono); font-size: 11px; color: var(--red); font-weight: 700; flex-shrink: 0; }
 
 /* News list */
-.news-item {
-  padding: 13px 0;
-  border-bottom: 1px solid var(--hairline);
-}
+.news-item { padding: 13px 0; border-bottom: 1px solid var(--hairline); }
 .news-item:last-child { border-bottom: none; }
-.news-item h3 {
-  font-size: 14.5px;
-  margin: 0 0 4px;
-  font-weight: 600;
-}
-.news-item p {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--cream-dim);
-}
+.news-item h3 { font-size: 14.5px; margin: 0 0 4px; font-weight: 600; }
+.news-item p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--cream-dim); }
 
 /* Stat grid */
-.stat-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .stat-tile {
   background: var(--panel-raised);
   border: 1px solid var(--hairline-strong);
@@ -390,19 +417,10 @@ main {
   font-weight: 700;
   line-height: 1;
 }
-.stat-tile .sub {
-  font-size: 11.5px;
-  color: var(--cream-faint);
-  margin-top: 6px;
-  line-height: 1.4;
-}
+.stat-tile .sub { font-size: 11.5px; color: var(--cream-faint); margin-top: 6px; line-height: 1.4; }
 
 /* Profile header card (player / club) */
-.profile-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
+.profile-card { display: flex; align-items: center; gap: 14px; }
 .profile-card .num {
   width: 60px;
   height: 60px;
@@ -427,15 +445,8 @@ main {
   height: 1px;
   background: var(--void);
 }
-.profile-card h2 {
-  margin: 0 0 3px;
-  font-size: 18px;
-}
-.profile-card .tagline {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--cream-faint);
-}
+.profile-card h2 { margin: 0 0 3px; font-size: 18px; }
+.profile-card .tagline { font-family: var(--font-mono); font-size: 11.5px; color: var(--cream-faint); }
 
 .detail-list {
   display: grid;
@@ -453,42 +464,21 @@ main {
   color: var(--cream-faint);
   margin-bottom: 2px;
 }
-.detail-list .item .v {
-  font-size: 13.5px;
-  font-weight: 500;
-}
+.detail-list .item .v { font-size: 13.5px; font-weight: 500; }
 
-.status-note {
-  font-size: 13.5px;
-  line-height: 1.55;
-  color: var(--cream-dim);
-  margin-top: 12px;
-}
+.status-note { font-size: 13.5px; line-height: 1.55; color: var(--cream-dim); margin-top: 12px; }
 
-/* Rights explainer cards (SRF tab) */
+/* Rights explainer cards (Broadcaster tab) */
 .rights-card {
   background: var(--panel);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-md);
   padding: 14px;
   margin-bottom: 8px;
+  box-shadow: var(--shadow-card);
 }
-.rights-card .comp-name {
-  font-weight: 700;
-  font-size: 14.5px;
-  margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.rights-card .row {
-  display: flex;
-  gap: 8px;
-  font-size: 12.5px;
-  line-height: 1.5;
-  margin-bottom: 4px;
-}
+.rights-card .comp-name { font-weight: 700; font-size: 14.5px; margin-bottom: 8px; }
+.rights-card .row { display: flex; gap: 8px; font-size: 12.5px; line-height: 1.5; margin-bottom: 4px; }
 .rights-card .row .tag {
   font-family: var(--font-mono);
   font-size: 9.5px;
@@ -497,7 +487,7 @@ main {
   color: var(--cream-faint);
   flex-shrink: 0;
   padding-top: 2px;
-  width: 52px;
+  width: 56px;
 }
 .rights-card .row .val { color: var(--cream-dim); flex: 1; }
 .rights-card .until {
@@ -509,23 +499,17 @@ main {
   border-top: 1px solid var(--hairline);
 }
 
-.empty-state {
-  text-align: center;
-  padding: 28px 16px;
-  color: var(--cream-faint);
-  font-size: 13px;
-  line-height: 1.6;
-}
+.empty-state { text-align: center; padding: 28px 16px; color: var(--cream-faint); font-size: 13px; line-height: 1.6; }
 
 /* ---------------------------------------------------------------------
    Countdown flip clock — signature element (Home)
    --------------------------------------------------------------------- */
 
-.countdown-wrap {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
+/* Mobile-first: 1 Spalte. Ein Countdown braucht ~195px Minimalbreite
+   (6 Flip-Karten à 22px + Trenner + Padding) — zwei nebeneinander passen
+   erst ab echter Breite (siehe Breakpoints weiter unten), sonst würde es
+   selbst auf einem Pixel 8 Pro (412px) knapp überlaufen. */
+.countdown-wrap { display: grid; grid-template-columns: 1fr; gap: 10px; }
 
 .countdown-card {
   background: linear-gradient(165deg, var(--panel-raised), var(--panel));
@@ -533,7 +517,6 @@ main {
   border-radius: var(--radius-lg);
   padding: 14px;
 }
-
 .countdown-card .cc-label {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -542,40 +525,21 @@ main {
   color: var(--cream-faint);
   margin-bottom: 6px;
 }
-
 .countdown-card .cc-opponent {
   font-size: 14px;
   font-weight: 600;
   margin-bottom: 10px;
   min-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.flip-group {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-bottom: 8px;
-}
+.flip-group { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+.flip-unit { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.flip-digits { display: flex; gap: 1px; }
 
-.flip-unit {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-
-.flip-digits {
-  display: flex;
-  gap: 1px;
-}
-
-.flip-card {
-  position: relative;
-  width: 22px;
-  height: 30px;
-  perspective: 120px;
-}
-
+.flip-card { position: relative; width: 22px; height: 30px; perspective: 120px; }
 .flip-face {
   position: absolute;
   inset: 0;
@@ -592,7 +556,6 @@ main {
   border: 1px solid var(--hairline-strong);
   overflow: hidden;
 }
-
 .flip-face::after {
   content: "";
   position: absolute;
@@ -600,53 +563,23 @@ main {
   right: 0;
   top: 50%;
   height: 1px;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.35);
 }
-
-.flip-face.flipping {
-  animation: flipDown 0.5s ease;
-}
-
+.flip-face.flipping { animation: flipDown 0.5s ease; }
 @keyframes flipDown {
   0%   { transform: rotateX(0deg); }
   50%  { transform: rotateX(-90deg); }
   51%  { transform: rotateX(90deg); }
   100% { transform: rotateX(0deg); }
 }
+.flip-sep { font-family: var(--font-mono); font-weight: 700; color: var(--cream-faint); padding: 0 1px; }
+.flip-unit .flip-caption { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--cream-faint); }
 
-.flip-sep {
-  font-family: var(--font-mono);
-  font-weight: 700;
-  color: var(--cream-faint);
-  padding: 0 1px;
-}
-
-.flip-unit .flip-caption {
-  font-family: var(--font-mono);
-  font-size: 8.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--cream-faint);
-}
-
-.cc-meta {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--cream-faint);
-}
+.cc-meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--cream-faint); }
 
 /* Quick result chips (home) */
-.chip-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.result-chip {
-  background: var(--panel);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-md);
-  padding: 12px;
-}
+.chip-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.result-chip { background: var(--panel); border: 1px solid var(--hairline); border-radius: var(--radius-md); padding: 12px; box-shadow: var(--shadow-card); }
 .result-chip .who {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -654,17 +587,12 @@ main {
   text-transform: uppercase;
   color: var(--cream-faint);
   margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.result-chip .fixture {
-  font-size: 12.5px;
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-.result-chip .score {
-  font-family: var(--font-mono);
-  font-size: 19px;
-  font-weight: 700;
-}
+.result-chip .fixture { font-size: 12.5px; font-weight: 600; margin-bottom: 4px; }
+.result-chip .score { font-family: var(--font-mono); font-size: 19px; font-weight: 700; }
 
 .footer-note {
   text-align: center;
@@ -691,7 +619,7 @@ main {
 .install-banner.show { display: flex; }
 .install-banner button.install-btn {
   background: var(--red);
-  color: var(--cream);
+  color: #fff;
   padding: 7px 12px;
   border-radius: 7px;
   font-size: 12px;
@@ -700,15 +628,136 @@ main {
 }
 .install-banner .install-txt { color: var(--cream-dim); line-height: 1.4; }
 
-/* Simple fade-in for tab content */
-.view-enter {
-  animation: fadeIn 0.22s ease;
+/* Genug Breite für 2 Countdown-Karten nebeneinander (grosse Phones im
+   Hochformat, z.B. > 480px) — Pixel 8 Pro (412px) bleibt bewusst 1-spaltig. */
+@media (min-width: 480px) {
+  .countdown-wrap { grid-template-columns: 1fr 1fr; }
 }
+
+/* ---------------------------------------------------------------------
+   Settings view
+   --------------------------------------------------------------------- */
+
+.settings-section { }
+
+.theme-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--panel-raised);
+  padding: 4px;
+  border-radius: 12px;
+  border: 1px solid var(--hairline-strong);
+}
+.theme-toggle button {
+  flex: 1;
+  padding: 10px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cream-faint);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.theme-toggle button.active {
+  background: var(--panel);
+  color: var(--cream);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+
+.btn {
+  padding: 11px 16px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: transform 0.1s ease, opacity 0.15s ease;
+}
+.btn:active { transform: scale(0.97); }
+.btn-primary { background: var(--red); color: #fff; }
+.btn-secondary { background: var(--panel-raised); color: var(--cream); border: 1px solid var(--hairline-strong); }
+.btn-ghost { background: transparent; color: var(--cream-dim); border: 1px solid var(--hairline-strong); }
+
+.file-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.settings-meta { font-family: var(--font-mono); font-size: 11.5px; color: var(--cream-faint); line-height: 1.65; margin: 0; }
+
+.status-banner { padding: 10px 12px; border-radius: 10px; font-size: 12.5px; margin-top: 10px; line-height: 1.5; }
+.status-banner.success { background: var(--green-dim); color: var(--green); }
+.status-banner.error { background: var(--red-dim); color: var(--red); }
+
+.prompt-box { position: relative; }
+.prompt-box pre {
+  background: var(--panel-raised);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 12px;
+  padding: 14px;
+  padding-top: 44px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--cream-dim);
+  margin: 0;
+}
+.prompt-box .copy-btn { position: absolute; top: 10px; right: 10px; z-index: 1; }
+
+/* Simple fade-in for tab content */
+.view-enter { animation: fadeIn 0.22s ease; }
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
-@media (min-width: 640px) {
-  .board-row { grid-template-columns: 44px 1fr auto; }
+/* =========================================================================
+   Responsive — ab hier reichlich Breite (aufgeklapptes Z Fold, Tablets):
+   Bottom-Bar wird zur seitlichen Nav-Rail, Inhalt nutzt die Breite besser.
+   ========================================================================= */
+
+@media (min-width: 600px) {
+  main {
+    max-width: 900px;
+    margin: 0 0 0 var(--nav-w);
+    padding: 24px 32px calc(32px + var(--safe-bottom));
+  }
+  .topbar { margin-left: var(--nav-w); padding: calc(20px + var(--safe-top)) 32px 16px; }
+
+  .tabbar {
+    top: 0;
+    left: 0;
+    right: auto;
+    bottom: 0;
+    width: var(--nav-w);
+    height: 100%;
+    padding: calc(var(--safe-top) + 20px) 6px 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 4px;
+    border-top: none;
+    border-right: 1px solid var(--hairline);
+  }
+  .tabbar button { padding: 11px 4px; border-radius: var(--radius-md); }
+  .tabbar button.active { background: var(--panel-raised); }
+  .tabbar button .tab-underline { display: none; }
+
+  .match-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
+  .match-list .board-row,
+  .match-list .result-row { margin-bottom: 0; }
+}
+
+@media (min-width: 900px) {
+  main { max-width: 1080px; padding-left: 40px; padding-right: 40px; }
+  .topbar { padding-left: 40px; padding-right: 40px; }
+  .stat-grid { grid-template-columns: repeat(4, 1fr); }
+  .flip-card { width: 26px; height: 34px; }
+  .flip-face { font-size: 19px; }
+}
+
+@media (min-width: 600px) and (max-width: 899px) {
+  .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }

@@ -1,7 +1,7 @@
 {
-  "name": "Fussball Tracker — Mbappé · FC Basel · SRF",
+  "name": "Fussball Tracker",
   "short_name": "Kick.",
-  "description": "Persönlicher Fussball-Tracker: Mbappé, FC Basel und alle gratis Live-Spiele auf SRF Sport.",
+  "description": "Persönlicher Fussball-Tracker für Spieler, Klub und gratis Live-Spiele — Inhalt kommt aus einer austauschbaren JSON-Datei.",
   "start_url": "./index.html#home",
   "scope": "./",
   "id": "./index.html",

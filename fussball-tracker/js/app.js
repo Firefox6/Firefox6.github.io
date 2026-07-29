@@ -1,20 +1,24 @@
 /**
  * app.js — Fussball Tracker
- * Kleine handgeschriebene SPA ohne Framework: 4 Tabs, gerendert aus APP_DATA.
+ * Kleine handgeschriebene SPA ohne Framework: Router + Renderer, generisch
+ * für player/club/broadcaster (statt fest verdrahtet auf Mbappé/Basel/SRF),
+ * damit ein importierter Datensatz die App vollständig umkrempeln kann.
  */
 
 (() => {
   "use strict";
 
   const WEEKDAYS = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
-  const MONTHS = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
   const MONTHS_LONG = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
 
   const $main = document.getElementById("main-content");
   const $eyebrow = document.getElementById("topbar-eyebrow");
   const $title = document.getElementById("topbar-title");
+  const $tabbar = document.querySelector(".tabbar");
   const $tabButtons = document.querySelectorAll(".tabbar button");
+  const $themeColorMeta = document.querySelector('meta[name="theme-color"]');
 
+  let DATA = Store.getActiveData();
   let activeIntervals = [];
 
   // ----------------------------------------------------------------------
@@ -35,11 +39,6 @@
     return `${WEEKDAYS[dt.getDay()]}, ${String(dt.getDate()).padStart(2, "0")}.${String(dt.getMonth() + 1).padStart(2, "0")}.`;
   }
 
-  function fmtLong(dateStr) {
-    const dt = parseLocal(dateStr, null);
-    return `${dt.getDate()}. ${MONTHS_LONG[dt.getMonth()]} ${dt.getFullYear()}`;
-  }
-
   function escapeHtml(str) {
     if (str == null) return "";
     return String(str)
@@ -49,38 +48,27 @@
   }
 
   // ----------------------------------------------------------------------
-  // Data helpers
+  // Entity / match helpers (generic — works for any player/club names)
   // ----------------------------------------------------------------------
 
-  function nextMatch(list) {
-    const now = new Date();
-    for (const m of list) {
-      const dt = parseLocal(m.date, m.time);
-      if (dt.getTime() >= now.getTime() - 3 * 60 * 60 * 1000) return m; // grace period 3h after kickoff
-    }
-    return null;
+  function coreName(name) {
+    return String(name || "")
+      .replace(/^FC\s+|^1\.\s*FC\s+/i, "")
+      .replace(/\s+\d{4}$/, "")
+      .trim()
+      .toLowerCase();
   }
 
-  function lastMatch(list) {
-    return list && list.length ? list[0] : null;
-  }
-
-  function freeBadge(match) {
-    return match.isFreeSRF
-      ? `<span class="badge free">Gratis SRF</span>`
-      : "";
-  }
-
-  function opponentLine(match, entityMatchers) {
-    const isHome = entityMatchers.some((n) => match.home.includes(n));
-    const opponent = isHome ? match.away : match.home;
-    const prefix = isHome ? "vs." : "@";
-    return { opponent, prefix, isHome };
+  function teamMatches(fixtureTeamName, entityName) {
+    const a = coreName(fixtureTeamName);
+    const b = coreName(entityName);
+    if (!a || !b) return false;
+    return a.includes(b) || b.includes(a);
   }
 
   function crestInitials(name) {
-    return name
-      .replace(/^FC |^1\.\s*FC /, "")
+    return String(name || "")
+      .replace(/^FC\s+|^1\.\s*FC\s+/i, "")
       .split(/[\s-]+/)
       .filter(Boolean)
       .slice(0, 2)
@@ -90,17 +78,48 @@
       .slice(0, 3);
   }
 
+  function nextMatch(list) {
+    const now = new Date();
+    for (const m of list || []) {
+      const dt = parseLocal(m.date, m.time);
+      if (dt.getTime() >= now.getTime() - 3 * 60 * 60 * 1000) return m; // 3h Kulanz nach Anpfiff
+    }
+    return null;
+  }
+
+  function lastMatch(list) {
+    return list && list.length ? list[0] : null;
+  }
+
+  function freeBadge(match) {
+    return match.isFreeBroadcast ? `<span class="badge free">Gratis live</span>` : "";
+  }
+
+  // entityName: string | null. Wenn gesetzt, wird Heim/Auswärts-Perspektive
+  // relativ zu dieser Entität berechnet ("vs." / "@"). Ohne entityName wird
+  // die Begegnung neutral als "Heim – Auswärts" gezeigt.
+  function opponentLine(match, entityName) {
+    if (!entityName) {
+      return { display: `${match.homeTeam} – ${match.awayTeam}`, isHome: null };
+    }
+    const isHome = teamMatches(match.homeTeam, entityName);
+    const opponent = isHome ? match.awayTeam : match.homeTeam;
+    const prefix = isHome ? "vs." : "@";
+    return { display: `${prefix} ${opponent}`, opponent, isHome };
+  }
+
   // ----------------------------------------------------------------------
-  // Renderers — shared pieces
+  // Shared row renderers
   // ----------------------------------------------------------------------
 
-  function boardRow(match, entityMatchers) {
-    const { opponent, prefix } = opponentLine(match, entityMatchers);
+  function boardRow(match, entityName) {
+    const { display, opponent } = opponentLine(match, entityName);
+    const crestSource = opponent || match.homeTeam;
     return `
       <div class="board-row">
-        <div class="crest">${escapeHtml(crestInitials(opponent))}</div>
+        <div class="crest">${escapeHtml(crestInitials(crestSource))}</div>
         <div class="info">
-          <p class="opponent">${prefix} ${escapeHtml(opponent)}</p>
+          <p class="opponent">${escapeHtml(display)}</p>
           <p class="meta">${escapeHtml(match.competition)}${match.venue ? " · " + escapeHtml(match.venue) : ""}</p>
         </div>
         <div class="side">
@@ -121,7 +140,7 @@
     return `
       <div class="result-row">
         <div class="top-line">
-          <span class="fixture">${escapeHtml(match.home)} ${match.score ? escapeHtml(match.score) : "–"} ${escapeHtml(match.away)}</span>
+          <span class="fixture">${escapeHtml(match.homeTeam)} ${match.score ? escapeHtml(match.score) : "–"} ${escapeHtml(match.awayTeam)}</span>
           ${goalChip}
         </div>
         <p class="comp">${escapeHtml(match.competition)} · ${fmtShort(match.date)}</p>
@@ -130,7 +149,13 @@
     `;
   }
 
+  function matchList(items, renderFn) {
+    if (!items || !items.length) return `<div class="empty-state">Keine Einträge.</div>`;
+    return `<div class="match-list">${items.map(renderFn).join("")}</div>`;
+  }
+
   function newsList(items) {
+    if (!items || !items.length) return `<div class="empty-state">Keine News.</div>`;
     return items
       .map(
         (n) => `
@@ -140,6 +165,23 @@
       </div>`
       )
       .join("");
+  }
+
+  function statGrid(stats) {
+    if (!stats || !stats.length) return `<div class="empty-state">Keine Statistiken.</div>`;
+    return `
+      <div class="stat-grid">
+        ${stats
+          .map(
+            (s) => `
+          <div class="stat-tile">
+            <p class="label">${escapeHtml(s.label)}</p>
+            <p class="value">${escapeHtml(s.value)} ${s.unit ? `<span style="font-size:13px;color:var(--cream-faint);">${escapeHtml(s.unit)}</span>` : ""}</p>
+            ${s.detail ? `<p class="sub">${escapeHtml(s.detail)}</p>` : ""}
+          </div>`
+          )
+          .join("")}
+      </div>`;
   }
 
   // ----------------------------------------------------------------------
@@ -167,8 +209,7 @@
       const newDigit = padded[i];
       if (face.textContent !== newDigit) {
         face.classList.remove("flipping");
-        // force reflow so animation can restart
-        void face.offsetWidth;
+        void face.offsetWidth; // reflow, damit die Animation neu starten kann
         face.classList.add("flipping");
         setTimeout(() => {
           face.textContent = newDigit;
@@ -180,7 +221,7 @@
     });
   }
 
-  function countdownCardHtml(cardId, label, match, entityMatchers) {
+  function countdownCardHtml(cardId, label, match, entityName) {
     if (!match) {
       return `
         <div class="countdown-card">
@@ -188,11 +229,11 @@
           <p class="cc-opponent">Kein Termin in den Daten</p>
         </div>`;
     }
-    const { opponent, prefix } = opponentLine(match, entityMatchers);
+    const { display } = opponentLine(match, entityName);
     return `
       <div class="countdown-card">
         <p class="cc-label">${escapeHtml(label)}</p>
-        <p class="cc-opponent">${prefix} ${escapeHtml(opponent)}${freeBadge(match) ? " " + freeBadge(match) : ""}</p>
+        <p class="cc-opponent">${escapeHtml(display)}${freeBadge(match) ? " " + freeBadge(match) : ""}</p>
         <div class="flip-group">
           ${flipUnitHtml(cardId + "-d", 2, "Tage")}
           <span class="flip-sep">:</span>
@@ -208,8 +249,7 @@
     if (!match) return;
     const target = parseLocal(match.date, match.time).getTime();
     function tick() {
-      const now = Date.now();
-      let diff = Math.max(0, target - now);
+      const diff = Math.max(0, target - Date.now());
       const totalMinutes = Math.floor(diff / 60000);
       const days = Math.floor(totalMinutes / (60 * 24));
       const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
@@ -228,213 +268,232 @@
   // ----------------------------------------------------------------------
 
   function viewHome() {
-    const m = APP_DATA.mbappe;
-    const b = APP_DATA.basel;
-    const nextM = nextMatch(m.upcomingMatches);
-    const nextB = nextMatch(b.upcomingMatches);
-    const lastM = lastMatch(m.pastMatches);
-    const lastB = lastMatch(b.pastMatches);
+    const p = DATA.player;
+    const c = DATA.club;
+    const b = DATA.broadcaster;
+    const nextP = nextMatch(p.upcomingMatches);
+    const nextC = nextMatch(c.upcomingMatches);
+    const lastP = lastMatch(p.pastMatches);
+    const lastC = lastMatch(c.pastMatches);
 
-    const freeUpcoming = [...m.upcomingMatches, ...b.upcomingMatches].filter((x) => x.isFreeSRF);
+    const freeUpcoming = [
+      ...(p.upcomingMatches || []).filter((x) => x.isFreeBroadcast).map((m) => ({ m, entity: p.profile.team })),
+      ...(c.upcomingMatches || []).filter((x) => x.isFreeBroadcast).map((m) => ({ m, entity: c.profile.name })),
+    ];
 
     return `
       <div class="view-enter">
         <p class="section-label">Nächste Spiele</p>
         <div class="countdown-wrap">
-          ${countdownCardHtml("cd-mbappe", "Mbappé / Real Madrid", nextM, ["Real Madrid"])}
-          ${countdownCardHtml("cd-basel", "FC Basel", nextB, ["Basel", "FC Basel"])}
+          ${countdownCardHtml("cd-player", p.label, nextP, p.profile.team)}
+          ${countdownCardHtml("cd-club", c.label, nextC, c.profile.name)}
         </div>
 
         <p class="section-label">Zuletzt</p>
         <div class="chip-row">
           <div class="result-chip">
-            <p class="who">Mbappé</p>
+            <p class="who">${escapeHtml(p.label)}</p>
             ${
-              lastM
-                ? `<p class="fixture">${escapeHtml(lastM.home)} – ${escapeHtml(lastM.away)}</p>
-                   <p class="score">${escapeHtml(lastM.score)}</p>`
+              lastP
+                ? `<p class="fixture">${escapeHtml(lastP.homeTeam)} – ${escapeHtml(lastP.awayTeam)}</p>
+                   <p class="score">${escapeHtml(lastP.score)}</p>`
                 : `<p class="fixture">Keine Daten</p>`
             }
           </div>
           <div class="result-chip">
-            <p class="who">FC Basel</p>
+            <p class="who">${escapeHtml(c.label)}</p>
             ${
-              lastB
-                ? `<p class="fixture">${escapeHtml(lastB.home)} – ${escapeHtml(lastB.away)}</p>
-                   <p class="score">${escapeHtml(lastB.score)}</p>`
+              lastC
+                ? `<p class="fixture">${escapeHtml(lastC.homeTeam)} – ${escapeHtml(lastC.awayTeam)}</p>
+                   <p class="score">${escapeHtml(lastC.score)}</p>`
                 : `<p class="fixture">Keine Daten</p>`
             }
           </div>
         </div>
 
-        <p class="section-label">SRF Sport — gratis live</p>
+        <p class="section-label">${escapeHtml(b.label)} — gratis live</p>
         <div class="card">
           ${
             freeUpcoming.length
-              ? freeUpcoming.map((x) => boardRow(x, ["Real Madrid", "Basel", "FC Basel"])).join("")
-              : `<p class="status-note" style="margin-top:0;">${escapeHtml(APP_DATA.srf.note)}</p>`
+              ? freeUpcoming.map(({ m, entity }) => boardRow(m, entity)).join("")
+              : `<p class="status-note" style="margin-top:0;">${escapeHtml(b.emptyStateNote)}</p>`
           }
         </div>
 
         <p class="section-label">News</p>
         <div class="card">
-          ${newsList([m.news[0], b.news[0]])}
+          ${newsList([p.news && p.news[0], c.news && c.news[0]].filter(Boolean))}
         </div>
 
-        <p class="footer-note">Stand: ${APP_DATA.meta.lastUpdatedLabel}</p>
+        <p class="footer-note">Stand: ${escapeHtml(DATA.meta.lastUpdatedLabel)}</p>
       </div>
     `;
   }
 
-  function viewMbappe() {
-    const m = APP_DATA.mbappe;
-    const p = m.profile;
-    const s = m.stats;
+  function viewEntity(entity, kind) {
+    // kind: "player" | "club" — steuert Profilfelder & Perspektive
+    const isPlayer = kind === "player";
+    const entityName = isPlayer ? entity.profile.team : entity.profile.name;
+    const tagline = isPlayer
+      ? `${escapeHtml(entity.profile.team)} · ${escapeHtml(entity.profile.nationalTeam)} · ${escapeHtml(entity.profile.position)}`
+      : `${escapeHtml(entity.profile.stadium)} · Trainer: ${escapeHtml(entity.profile.coach)}`;
+    const numBadge = isPlayer
+      ? entity.profile.shirtNumber
+      : (entity.profile.name || "")
+          .replace(/^FC\s+/i, "")
+          .split(/\s+/)
+          .map((w) => w[0])
+          .join("")
+          .slice(0, 3)
+          .toUpperCase();
+
+    const detailItems = isPlayer
+      ? [
+          ["Geboren", `${entity.profile.born} (${entity.profile.age})`],
+          ["Grösse", entity.profile.height],
+          ["Fuss", entity.profile.foot],
+          ["Vertrag bis", entity.profile.contractUntil],
+        ]
+      : [
+          ["Gegründet", entity.profile.founded],
+          ["Präsident", entity.profile.president],
+          ["Stadion", entity.profile.stadium],
+          ["Trainer", entity.profile.coach],
+        ];
+
     return `
       <div class="view-enter">
         <div class="card profile-card">
-          <div class="num">${p.shirt}</div>
+          <div class="num" style="${isPlayer ? "" : "font-size:15px;"}">${escapeHtml(numBadge)}</div>
           <div>
-            <h2>${escapeHtml(p.name)}</h2>
-            <p class="tagline">${escapeHtml(p.club)} · ${escapeHtml(p.nationalTeam)} · ${escapeHtml(p.position)}</p>
+            <h2>${escapeHtml(entity.profile.name)}</h2>
+            <p class="tagline">${tagline}</p>
           </div>
         </div>
         <div class="card">
-          <p class="status-note" style="margin-top:0;">${escapeHtml(m.statusNote)}</p>
+          <p class="status-note" style="margin-top:0;">${escapeHtml(entity.statusNote)}</p>
           <div class="detail-list">
-            <div class="item"><div class="k">Geboren</div><div class="v">${escapeHtml(p.born)} (${p.age})</div></div>
-            <div class="item"><div class="k">Grösse</div><div class="v">${escapeHtml(p.height)}</div></div>
-            <div class="item"><div class="k">Fuss</div><div class="v">${escapeHtml(p.foot)}</div></div>
-            <div class="item"><div class="k">Vertrag bis</div><div class="v">${escapeHtml(p.contractUntil)}</div></div>
+            ${detailItems.map(([k, v]) => `<div class="item"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(v)}</div></div>`).join("")}
           </div>
         </div>
 
         <p class="section-label">Statistiken</p>
-        <div class="stat-grid">
-          <div class="stat-tile">
-            <p class="label">${escapeHtml(s.laliga2526.label)}</p>
-            <p class="value">${s.laliga2526.goals} <span style="font-size:13px;color:var(--cream-faint);">Tore</span></p>
-            <p class="sub">${s.laliga2526.matches} Spiele · ${s.laliga2526.assists} Assists — ${escapeHtml(s.laliga2526.note)}</p>
-          </div>
-          <div class="stat-tile">
-            <p class="label">${escapeHtml(s.ucl2526.label)}</p>
-            <p class="value">${s.ucl2526.goals} <span style="font-size:13px;color:var(--cream-faint);">Tore</span></p>
-            <p class="sub">${escapeHtml(s.ucl2526.note)}</p>
-          </div>
-          <div class="stat-tile">
-            <p class="label">${escapeHtml(s.overall2526.label)}</p>
-            <p class="value">${s.overall2526.goals} <span style="font-size:13px;color:var(--cream-faint);">Tore</span></p>
-            <p class="sub">${s.overall2526.matches} Spiele · ${s.overall2526.assists} Assists</p>
-          </div>
-          <div class="stat-tile">
-            <p class="label">${escapeHtml(s.worldCup2026.label)}</p>
-            <p class="value">${s.worldCup2026.goals} <span style="font-size:13px;color:var(--cream-faint);">Tore</span></p>
-            <p class="sub">${escapeHtml(s.worldCup2026.note)}</p>
-          </div>
-        </div>
+        ${statGrid(entity.stats)}
 
         <p class="section-label">Kommende Spiele</p>
-        ${m.upcomingMatches.map((x) => boardRow(x, ["Real Madrid"])).join("")}
+        ${matchList(entity.upcomingMatches, (x) => boardRow(x, entityName))}
 
-        <p class="section-label">Letzte Spiele &amp; Tore</p>
-        ${m.pastMatches.map((x) => resultRow(x, { goalKey: "goalsScored" })).join("")}
+        <p class="section-label">Letzte Spiele${isPlayer ? " &amp; Tore" : ""}</p>
+        ${matchList(entity.pastMatches, (x) => resultRow(x, isPlayer ? { goalKey: "goalsScored" } : {}))}
 
         <p class="section-label">News</p>
-        <div class="card">${newsList(m.news)}</div>
+        <div class="card">${newsList(entity.news)}</div>
 
-        <p class="footer-note">Stand: ${APP_DATA.meta.lastUpdatedLabel}</p>
+        <p class="footer-note">Stand: ${escapeHtml(DATA.meta.lastUpdatedLabel)}</p>
       </div>
     `;
   }
 
-  function viewBasel() {
-    const b = APP_DATA.basel;
-    const p = b.profile;
-    const s = b.stats;
-    return `
-      <div class="view-enter">
-        <div class="card profile-card">
-          <div class="num" style="font-size:15px;">FCB</div>
-          <div>
-            <h2>${escapeHtml(p.name)}</h2>
-            <p class="tagline">${escapeHtml(p.stadium)} · Trainer: ${escapeHtml(p.coach)}</p>
-          </div>
-        </div>
-        <div class="card">
-          <p class="status-note" style="margin-top:0;">${escapeHtml(b.statusNote)}</p>
-          <div class="detail-list">
-            <div class="item"><div class="k">Gegründet</div><div class="v">${p.founded}</div></div>
-            <div class="item"><div class="k">Präsident</div><div class="v">${escapeHtml(p.president)}</div></div>
-            <div class="item"><div class="k">Vorsaison</div><div class="v">Platz ${s.lastSeason.position}</div></div>
-            <div class="item"><div class="k">Cup 25/26</div><div class="v">${escapeHtml(s.lastSeason.cup)}</div></div>
-          </div>
-        </div>
-
-        <p class="section-label">Statistiken</p>
-        <div class="stat-grid">
-          <div class="stat-tile">
-            <p class="label">Topscorer 25/26 (Liga)</p>
-            <p class="value">${s.topScorerLastSeason.leagueGoals} <span style="font-size:13px;color:var(--cream-faint);">Tore</span></p>
-            <p class="sub">${escapeHtml(s.topScorerLastSeason.name)} — ${s.topScorerLastSeason.allGoals} Tore in allen Wettbewerben</p>
-          </div>
-          <div class="stat-tile">
-            <p class="label">Neuzugänge 26/27</p>
-            <p class="value" style="font-size:17px;">${s.newSignings.length}</p>
-            <p class="sub">${escapeHtml(s.newSignings.join(", "))} · Rückkehrer: ${escapeHtml(s.returnee)}</p>
-          </div>
-        </div>
-
-        <p class="section-label">Kommende Spiele</p>
-        ${b.upcomingMatches.map((x) => boardRow(x, ["Basel", "FC Basel"])).join("")}
-
-        <p class="section-label">Letzte Spiele</p>
-        ${b.pastMatches.map((x) => resultRow(x)).join("")}
-
-        <p class="section-label">News</p>
-        <div class="card">${newsList(b.news)}</div>
-
-        <p class="footer-note">Stand: ${APP_DATA.meta.lastUpdatedLabel}</p>
-      </div>
-    `;
-  }
-
-  function viewSRF() {
-    const srf = APP_DATA.srf;
+  function viewBroadcaster() {
+    const b = DATA.broadcaster;
     const freeUpcoming = [
-      ...APP_DATA.mbappe.upcomingMatches.filter((x) => x.isFreeSRF),
-      ...APP_DATA.basel.upcomingMatches.filter((x) => x.isFreeSRF),
-      ...srf.upcomingFreeMatches,
+      ...(DATA.player.upcomingMatches || [])
+        .filter((x) => x.isFreeBroadcast)
+        .map((m) => ({ m, entity: DATA.player.profile.team })),
+      ...(DATA.club.upcomingMatches || [])
+        .filter((x) => x.isFreeBroadcast)
+        .map((m) => ({ m, entity: DATA.club.profile.name })),
+      ...(b.upcomingFreeMatches || []).map((m) => ({ m, entity: null })),
     ];
 
     return `
       <div class="view-enter">
         <div class="card">
-          <p class="status-note" style="margin-top:0;">${escapeHtml(srf.intro)}</p>
+          <p class="status-note" style="margin-top:0;">${escapeHtml(b.intro)}</p>
         </div>
 
         <p class="section-label">Gratis Live-Spiele — nächste Tage</p>
         <div class="card">
           ${
             freeUpcoming.length
-              ? freeUpcoming.map((x) => boardRow(x, ["Real Madrid", "Basel", "FC Basel"])).join("")
-              : `<div class="empty-state">${escapeHtml(srf.note)}</div>`
+              ? freeUpcoming.map(({ m, entity }) => boardRow(m, entity)).join("")
+              : `<div class="empty-state">${escapeHtml(b.emptyStateNote)}</div>`
           }
         </div>
 
         <p class="section-label">Übertragungsrechte im Überblick</p>
-        ${srf.rights
+        ${(b.rights || [])
           .map(
             (r) => `
           <div class="rights-card">
             <p class="comp-name">${escapeHtml(r.competition)}</p>
-            <div class="row"><span class="tag">Rechte</span><span class="val">${escapeHtml(r.holder)}</span></div>
-            <div class="row"><span class="tag">SRF</span><span class="val">${escapeHtml(r.srfPart)}</span></div>
-            <p class="until">${escapeHtml(r.until)}</p>
+            <div class="row"><span class="tag">Rechte</span><span class="val">${escapeHtml(r.rightsHolder)}</span></div>
+            <div class="row"><span class="tag">${escapeHtml(b.label)}</span><span class="val">${escapeHtml(r.freeCoverage)}</span></div>
+            <p class="until">${escapeHtml(r.validity)}</p>
           </div>`
           )
           .join("")}
 
-        <p class="footer-note">Stand: ${APP_DATA.meta.lastUpdatedLabel}</p>
+        <p class="footer-note">Stand: ${escapeHtml(DATA.meta.lastUpdatedLabel)}</p>
+      </div>
+    `;
+  }
+
+  function viewSettings() {
+    const theme = Store.getTheme();
+    const overrideActive = Store.isOverrideActive();
+    const importedAt = Store.getImportedAt();
+    const importedAtLabel = importedAt
+      ? new Date(importedAt).toLocaleString("de-CH", { dateStyle: "medium", timeStyle: "short" })
+      : null;
+
+    return `
+      <div class="view-enter">
+
+        <p class="section-label">Darstellung</p>
+        <div class="card settings-section">
+          <div class="theme-toggle" role="group" aria-label="Farbschema">
+            <button type="button" data-theme-choice="dark" aria-pressed="${theme === "dark"}" class="${theme === "dark" ? "active" : ""}">Dunkel</button>
+            <button type="button" data-theme-choice="light" aria-pressed="${theme === "light"}" class="${theme === "light" ? "active" : ""}">Hell</button>
+          </div>
+        </div>
+
+        <p class="section-label">Daten</p>
+        <div class="card settings-section">
+          <p class="settings-meta" style="margin-bottom:12px;">
+            Aktive Quelle: <strong style="color:var(--cream);">${overrideActive ? "importierte Datei" : "mitgelieferter Standard"}</strong><br/>
+            Inhalt-Stand laut Datei: ${escapeHtml(DATA.meta.lastUpdatedLabel || "–")}${importedAtLabel ? `<br/>Importiert am: ${escapeHtml(importedAtLabel)} (auf diesem Gerät)` : ""}
+          </p>
+
+          <div class="file-row">
+            <button type="button" class="btn btn-primary" id="btn-export">JSON exportieren</button>
+            <button type="button" class="btn btn-secondary" id="btn-import">JSON importieren</button>
+            ${overrideActive ? `<button type="button" class="btn btn-ghost" id="btn-reset">Auf Standard zurücksetzen</button>` : ""}
+            <input type="file" id="import-file-input" accept="application/json,.json" style="display:none" />
+          </div>
+          <div id="import-status"></div>
+        </div>
+
+        <p class="section-label">Daten aktualisieren per KI-Prompt</p>
+        <div class="card settings-section">
+          <p class="status-note" style="margin-top:0;">
+            Diesen Prompt in einer neuen Unterhaltung mit Claude einfügen (Websuche aktiviert). Die Antwort als .json speichern und oben importieren — die App ist wieder aktuell.
+          </p>
+          <div class="prompt-box">
+            <button type="button" class="btn btn-secondary copy-btn" id="btn-copy-prompt">Kopieren</button>
+            <pre id="ai-prompt-text">${escapeHtml(Store.buildAiPrompt(DATA))}</pre>
+          </div>
+        </div>
+
+        <p class="section-label">Über</p>
+        <div class="card settings-section">
+          <p class="settings-meta">
+            Fussball Tracker · Schema-Version ${DATA.schemaVersion || 1}<br/>
+            Läuft vollständig offline, keine Server-Anbindung. Alle Inhalte kommen aus der aktiven JSON-Datei.
+          </p>
+        </div>
+
+        <p class="footer-note">Stand: ${escapeHtml(DATA.meta.lastUpdatedLabel)}</p>
       </div>
     `;
   }
@@ -443,40 +502,71 @@
   // Router
   // ----------------------------------------------------------------------
 
-  const VIEWS = {
-    home: { title: "Startseite", eyebrow: "Fussball Tracker", render: viewHome },
-    mbappe: { title: "Kylian Mbappé", eyebrow: "Spieler-Tracker", render: viewMbappe },
-    basel: { title: "FC Basel 1893", eyebrow: "Klub-Tracker", render: viewBasel },
-    srf: { title: "SRF Sport", eyebrow: "Gratis Live-Übersicht", render: viewSRF },
-  };
+  function getViewsMeta() {
+    return {
+      home: { title: "Startseite", eyebrow: "Fussball Tracker", render: viewHome },
+      player: { title: DATA.player.profile.name, eyebrow: "Spieler-Tracker", render: () => viewEntity(DATA.player, "player") },
+      club: { title: DATA.club.profile.name, eyebrow: "Klub-Tracker", render: () => viewEntity(DATA.club, "club") },
+      broadcaster: { title: DATA.broadcaster.name, eyebrow: "Gratis Live-Übersicht", render: viewBroadcaster },
+      settings: { title: "Einstellungen", eyebrow: "App", render: viewSettings },
+    };
+  }
+
+  let currentTab = "home";
 
   function clearIntervals() {
     activeIntervals.forEach(clearInterval);
     activeIntervals = [];
   }
 
+  function syncNavLabels() {
+    $tabButtons.forEach((btn) => {
+      const labelSpan = btn.querySelector("span:not(.tab-underline)");
+      if (!labelSpan) return;
+      switch (btn.dataset.tab) {
+        case "player":
+          labelSpan.textContent = DATA.player.label;
+          break;
+        case "club":
+          labelSpan.textContent = DATA.club.label;
+          break;
+        case "broadcaster":
+          labelSpan.textContent = DATA.broadcaster.label;
+          break;
+        default:
+          break;
+      }
+    });
+  }
+
   function goTo(tab) {
-    const view = VIEWS[tab] || VIEWS.home;
+    const meta = getViewsMeta();
+    const view = meta[tab] || meta.home;
+    currentTab = meta[tab] ? tab : "home";
     clearIntervals();
+    syncNavLabels();
+
     $eyebrow.textContent = view.eyebrow;
     $title.textContent = view.title;
     $main.innerHTML = view.render();
 
     $tabButtons.forEach((btn) => {
-      const on = btn.dataset.tab === tab;
+      const on = btn.dataset.tab === currentTab;
       btn.classList.toggle("active", on);
       if (on) btn.setAttribute("aria-current", "page");
       else btn.removeAttribute("aria-current");
     });
 
-    if (tab === "home") {
-      startCountdownTicker("cd-mbappe", nextMatch(APP_DATA.mbappe.upcomingMatches));
-      startCountdownTicker("cd-basel", nextMatch(APP_DATA.basel.upcomingMatches));
+    if (currentTab === "home") {
+      startCountdownTicker("cd-player", nextMatch(DATA.player.upcomingMatches));
+      startCountdownTicker("cd-club", nextMatch(DATA.club.upcomingMatches));
+    } else if (currentTab === "settings") {
+      initSettingsView();
     }
 
-    window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
+    window.scrollTo({ top: 0, behavior: "auto" });
     try {
-      history.replaceState(null, "", "#" + tab);
+      history.replaceState(null, "", "#" + currentTab);
     } catch (e) {
       /* ignore */
     }
@@ -486,8 +576,137 @@
     btn.addEventListener("click", () => goTo(btn.dataset.tab));
   });
 
+  // ----------------------------------------------------------------------
+  // Settings view interactivity
+  // ----------------------------------------------------------------------
+
+  function applyTheme(name) {
+    document.documentElement.setAttribute("data-theme", name === "light" ? "light" : "dark");
+    if ($themeColorMeta) {
+      $themeColorMeta.setAttribute("content", name === "light" ? "#eef0f4" : "#0b0e14");
+    }
+  }
+
+  function showImportStatus(kind, message) {
+    const el = document.getElementById("import-status");
+    if (!el) return;
+    el.innerHTML = `<div class="status-banner ${kind}">${escapeHtml(message)}</div>`;
+  }
+
+  function reloadDataAndRerender(tab) {
+    DATA = Store.getActiveData();
+    goTo(tab || currentTab);
+  }
+
+  function initSettingsView() {
+    // Theme toggle
+    document.querySelectorAll("[data-theme-choice]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const choice = btn.dataset.themeChoice;
+        Store.setTheme(choice);
+        applyTheme(choice);
+        document.querySelectorAll("[data-theme-choice]").forEach((b) => {
+          const active = b === btn;
+          b.classList.toggle("active", active);
+          b.setAttribute("aria-pressed", String(active));
+        });
+      });
+    });
+
+    // Export
+    const exportBtn = document.getElementById("btn-export");
+    if (exportBtn) {
+      exportBtn.addEventListener("click", () => {
+        const str = Store.exportActiveDataString();
+        const blob = new Blob([str], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const dateForName = (DATA.meta && DATA.meta.lastUpdated) || "export";
+        a.href = url;
+        a.download = `fussball-tracker-daten-${dateForName}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      });
+    }
+
+    // Import
+    const importBtn = document.getElementById("btn-import");
+    const fileInput = document.getElementById("import-file-input");
+    if (importBtn && fileInput) {
+      importBtn.addEventListener("click", () => fileInput.click());
+      fileInput.addEventListener("change", () => {
+        const file = fileInput.files && fileInput.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = Store.importFromString(String(reader.result));
+          if (result.ok) {
+            showImportStatus("success", "Import erfolgreich — Daten aktualisiert.");
+            reloadDataAndRerender("settings");
+          } else {
+            showImportStatus("error", "Import fehlgeschlagen: " + result.errors.join(" "));
+          }
+        };
+        reader.onerror = () => showImportStatus("error", "Datei konnte nicht gelesen werden.");
+        reader.readAsText(file);
+        fileInput.value = "";
+      });
+    }
+
+    // Reset
+    const resetBtn = document.getElementById("btn-reset");
+    if (resetBtn) {
+      resetBtn.addEventListener("click", () => {
+        if (window.confirm("Wirklich auf die mitgelieferten Standarddaten zurücksetzen?")) {
+          Store.resetToDefault();
+          reloadDataAndRerender("settings");
+          showImportStatus("success", "Zurückgesetzt auf Standarddaten.");
+        }
+      });
+    }
+
+    // Copy AI prompt
+    const copyBtn = document.getElementById("btn-copy-prompt");
+    if (copyBtn) {
+      copyBtn.addEventListener("click", async () => {
+        const text = Store.buildAiPrompt(DATA);
+        const original = copyBtn.textContent;
+        try {
+          await navigator.clipboard.writeText(text);
+          copyBtn.textContent = "Kopiert ✓";
+        } catch (e) {
+          // Fallback für ältere WebViews ohne Clipboard API
+          const ta = document.getElementById("ai-prompt-text");
+          const range = document.createRange();
+          range.selectNodeContents(ta);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          try {
+            document.execCommand("copy");
+            copyBtn.textContent = "Kopiert ✓";
+          } catch (e2) {
+            copyBtn.textContent = "Bitte manuell markieren";
+          }
+          sel.removeAllRanges();
+        }
+        setTimeout(() => {
+          copyBtn.textContent = original;
+        }, 1600);
+      });
+    }
+  }
+
+  // ----------------------------------------------------------------------
+  // Init
+  // ----------------------------------------------------------------------
+
+  applyTheme(Store.getTheme());
+
   const initialTab = (location.hash || "").replace("#", "");
-  goTo(VIEWS[initialTab] ? initialTab : "home");
+  goTo(getViewsMeta()[initialTab] ? initialTab : "home");
 
   // ----------------------------------------------------------------------
   // PWA: service worker + install prompt
