@@ -51,6 +51,10 @@ Nach echtem Testen auf dem Pixel 8 Pro kamen diese Korrekturen dazu:
 - `concept.md`-Kopfzeile/Beispieltexte von "Julien Tracking" auf "FitTrack" aktualisiert. **Nicht** umbenannt (bewusst): `DB_NAME = "julien_tracking_db"` und die Legacy-localStorage-Migrationsschlüssel in db.js — würde bestehende Nutzerdaten verwaisen lassen.
 - `APP_VERSION` in service-worker.js auf `"2026-07-29-fixes-round2"` gebumpt.
 
+## PWA Shortcuts (2026-07-29)
+
+Android-Homescreen-Long-Press-Shortcuts ergänzt (Android/Chrome-only, iOS Safari ignoriert das folgenlos — passt zu Julien's Pixel 8 Pro). `manifest.webmanifest` hat jetzt ein `"shortcuts"`-Array (Barcode scannen/Gewicht eintragen/Schnelleintrag, jeweils `./?action=...`, wiederverwendet `icons/icon-192.png`). In [app.js](app.js) liest `applyLaunchAction()` (aufgerufen ganz am Anfang von `init()`, vor der Legacy-Migration) den `?action=`-Query-Parameter, setzt `state.tab`/`state.caloriePanel` entsprechend, bereinigt die URL sofort per `history.replaceState` (verhindert Re-Trigger bei späterem manuellem Reload) und öffnet bei `action=barcode` nach dem ersten `render()` automatisch `openBarcodeOverlay()`. Alle drei Aktionen sind end-to-end verifiziert (inkl. URL-Cleanup und "kein Doppel-Trigger nach Reload").
+
 ## Testing-Hinweis für zukünftige Sessions
 
 Lokal testen via `npx serve` (siehe `.claude/launch.json`, Port 5173). **Wichtig**: Der Service Worker cacht `app.js`/`styles.css` aggressiv (cache-first). Nach Code-Änderungen im Browser immer erst SW deregistrieren + Caches löschen (`navigator.serviceWorker.getRegistrations()` → `unregister()`, `caches.keys()` → `caches.delete()`) und neu laden, sonst testet man versehentlich die alte Version. Ausserdem: `requestAnimationFrame` (und damit die Canvas-Chart-Zeichnung) läuft nicht, wenn das Browser-Pane als "hidden"/nicht sichtbar gilt — Canvas-Logik lieber durch direkten Aufruf der Berechnungsfunktionen verifizieren statt per Screenshot.

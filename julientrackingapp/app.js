@@ -101,6 +101,7 @@ init();
 
 async function init() {
   bindEvents();
+  const launchAction = applyLaunchAction();
   const migration = await migrateLegacyLocalStorageData();
   if (migration.migrated) {
     showToast("Alte lokale Daten wurden sicher übernommen.");
@@ -108,11 +109,34 @@ async function init() {
   await render();
   registerServiceWorker();
 
+  if (launchAction === "barcode") {
+    await openBarcodeOverlay();
+  }
+
   checkDueReviews();
   setInterval(checkDueReviews, 60000);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) checkDueReviews();
   });
+}
+
+function applyLaunchAction() {
+  const params = new URLSearchParams(window.location.search);
+  const action = params.get("action");
+  if (!action) return null;
+
+  if (action === "barcode") {
+    state.tab = "calories";
+    state.caloriePanel = "barcode";
+  } else if (action === "weight") {
+    state.tab = "weight";
+  } else if (action === "quicklog") {
+    state.tab = "calories";
+    state.caloriePanel = "quick";
+  }
+
+  window.history.replaceState({}, document.title, window.location.pathname);
+  return action;
 }
 
 function bindEvents() {
