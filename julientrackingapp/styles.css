@@ -988,6 +988,15 @@ form > button {
   background: #000;
 }
 
+.share-qr-canvas {
+  margin: auto;
+  max-width: calc(100% - 32px);
+  padding: 16px;
+  background: #fff;
+  border-radius: 16px;
+  line-height: 0;
+}
+
 .update-banner {
   position: fixed;
   left: 16px;

@@ -79,6 +79,7 @@ const state = {
   caloriePanel: "quick",
   weightEditId: null,
   foodPresetEditId: null,
+  foodEntryEditId: null,
   waitingServiceWorker: null,
 };
 
@@ -93,6 +94,8 @@ let data = {
 let toastTimer = null;
 let renderToken = 0;
 let scannedProduct = null;
+let importedEntry = null;
+let scanMode = "barcode";
 let barcodeStream = null;
 let barcodeAnimationFrame = null;
 let zxingControls = null;
@@ -171,6 +174,10 @@ function bindEvents() {
 
   document.querySelector("#barcode-overlay")?.addEventListener("click", (event) => {
     if (event.target.closest("[data-action='close-barcode-scanner']")) closeBarcodeOverlay();
+  });
+
+  document.querySelector("#share-overlay")?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-action='close-share-overlay']")) closeShareOverlay();
   });
 
   const colorScheme = window.matchMedia?.("(prefers-color-scheme: dark)");
@@ -374,6 +381,7 @@ function renderCaloriesV2() {
         ${panelButton("preset", "+ Aus Preset")}
         ${panelButton("new-preset", state.foodPresetEditId ? "Preset bearbeiten" : "+ Neues Preset")}
         <button class="btn ${state.caloriePanel === "barcode" ? "primary" : "ghost"}" type="button" data-action="open-barcode-scanner">📷 Barcode Scannen</button>
+        <button class="btn ${state.caloriePanel === "import" ? "primary" : "ghost"}" type="button" data-action="open-import-scanner">📷 Eintrag importieren</button>
         <button class="btn ghost" type="button" data-action="copy-yesterday">Gestern kopieren</button>
       </div>
       <div style="margin-top: 16px;">
@@ -688,7 +696,23 @@ async function handleActionClick(event) {
       if (state.caloriePanel === button.dataset.panel) return;
       state.caloriePanel = button.dataset.panel;
       if (state.caloriePanel !== "new-preset") state.foodPresetEditId = null;
+      if (state.caloriePanel !== "quick") state.foodEntryEditId = null;
       await render();
+    }
+
+    if (action === "edit-food") {
+      state.foodEntryEditId = button.dataset.id;
+      state.caloriePanel = "quick";
+      await render();
+    }
+
+    if (action === "cancel-food-entry-edit") {
+      state.foodEntryEditId = null;
+      await render();
+    }
+
+    if (action === "share-food") {
+      await shareFoodEntry(button.dataset.id);
     }
 
     if (action === "edit-food-preset") {
@@ -721,6 +745,15 @@ async function handleActionClick(event) {
       await render();
     }
 
+    if (action === "open-import-scanner") {
+      await openBarcodeOverlay("import");
+    }
+
+    if (action === "cancel-import-scan") {
+      importedEntry = null;
+      await render();
+    }
+
     if (action === "copy-chatgpt-daily-context") {
       await copyChatGptDailyContextToClipboard();
     }
@@ -730,7 +763,10 @@ async function handleActionClick(event) {
     }
 
     if (action === "delete-food") {
-      await confirmDelete("Kalorieneintrag löschen?", async () => deleteItem("food_entries", button.dataset.id));
+      await confirmDelete("Kalorieneintrag löschen?", async () => {
+        await deleteItem("food_entries", button.dataset.id);
+        if (state.foodEntryEditId === button.dataset.id) state.foodEntryEditId = null;
+      });
     }
 
     if (action === "delete-food-preset") {
@@ -778,6 +814,7 @@ async function handleSubmit(event) {
     if (form.id === "settings-reminders-form") await saveReminderSettings(form);
     if (form.id === "settings-notifications-form") await saveNotificationSettings(form);
     if (form.id === "barcode-food-form") await saveBarcodeFood(form);
+    if (form.id === "import-food-form") await saveImportedFood(form);
     if (form.id === "import-form") await importData(form);
   } catch (error) {
     showToast(error.message || "Speichern fehlgeschlagen.");
@@ -859,10 +896,31 @@ async function saveWeightEntry(form) {
 }
 
 async function saveQuickFood(form) {
-  const date = state.selectedDate;
+  const entryId = formValue(form, "entry_id");
   const name = formValue(form, "name");
   if (!name) throw new Error("Bitte Name eintragen.");
 
+  if (entryId) {
+    const existing = await getItem("food_entries", entryId);
+    if (!existing) throw new Error("Eintrag nicht gefunden.");
+    const updated = buildFoodEntryFromForm(form, {
+      id: existing.id,
+      date: existing.date,
+      name,
+      meal: formValue(form, "meal"),
+      quantity: existing.quantity,
+      unit: existing.unit,
+      preset_id: existing.preset_id,
+    });
+    updated.created_at = existing.created_at;
+    await putItem("food_entries", updated);
+    state.foodEntryEditId = null;
+    showToast("Eintrag aktualisiert.");
+    await render();
+    return;
+  }
+
+  const date = state.selectedDate;
   const entry = buildFoodEntryFromForm(form, {
     id: generateId("food"),
     date,
@@ -1634,34 +1692,45 @@ function renderCaloriePanel() {
   if (state.caloriePanel === "preset") return renderPresetEntryForm();
   if (state.caloriePanel === "new-preset") return renderFoodPresetForm();
   if (state.caloriePanel === "barcode") return renderBarcodeScanForm();
+  if (state.caloriePanel === "import") return renderImportEntryForm();
   return renderQuickFoodForm();
 }
 
 function renderQuickFoodForm() {
+  const entry = state.foodEntryEditId
+    ? data.food_entries.find((item) => item.id === state.foodEntryEditId)
+    : null;
+
   return `
     <form id="quick-food-form">
+      <input type="hidden" name="entry_id" value="${attr(entry?.id || "")}">
       <div class="form-grid">
-        ${field("Name", `<input name="name" autocomplete="off" required>`)}
-        ${field("Mahlzeit", mealSelect("meal"))}
-        ${field("kcal", `<input type="number" name="calories_kcal" min="0" step="1" required>`)}
-        ${field("Protein g", `<input type="number" name="protein_g" min="0" step="0.1" required>`)}
-        ${field("KH g", `<input type="number" name="carbs_g" min="0" step="0.1" required>`)}
-        ${field("Fett g", `<input type="number" name="fat_g" min="0" step="0.1" required>`)}
-        ${field("Ballaststoffe g", `<input type="number" name="fiber_g" min="0" step="0.1">`)}
-        ${field("Zucker g", `<input type="number" name="sugar_g" min="0" step="0.1">`)}
-        ${field("Salz g", `<input type="number" name="salt_g" min="0" step="0.1">`)}
-        ${field("Notiz", `<textarea name="notes"></textarea>`, "full")}
+        ${field("Name", `<input name="name" autocomplete="off" value="${attr(entry?.name || "")}" required>`)}
+        ${field("Mahlzeit", mealSelect("meal", entry?.meal || ""))}
+        ${field("kcal", `<input type="number" name="calories_kcal" min="0" step="1" value="${attr(entry?.calories_kcal ?? "")}" required>`)}
+        ${field("Protein g", `<input type="number" name="protein_g" min="0" step="0.1" value="${attr(entry?.protein_g ?? "")}" required>`)}
+        ${field("KH g", `<input type="number" name="carbs_g" min="0" step="0.1" value="${attr(entry?.carbs_g ?? "")}" required>`)}
+        ${field("Fett g", `<input type="number" name="fat_g" min="0" step="0.1" value="${attr(entry?.fat_g ?? "")}" required>`)}
+        ${field("Ballaststoffe g", `<input type="number" name="fiber_g" min="0" step="0.1" value="${attr(entry?.fiber_g ?? "")}">`)}
+        ${field("Zucker g", `<input type="number" name="sugar_g" min="0" step="0.1" value="${attr(entry?.sugar_g ?? "")}">`)}
+        ${field("Salz g", `<input type="number" name="salt_g" min="0" step="0.1" value="${attr(entry?.salt_g ?? "")}">`)}
+        ${field("Notiz", `<textarea name="notes">${safe(entry?.notes || "")}</textarea>`, "full")}
       </div>
-      <label class="check-row">
-        <input id="quick-save-preset" type="checkbox" name="quick_save_preset">
-        Als Preset speichern
-      </label>
-      <div id="quick-preset-fields" class="form-grid" hidden>
-        ${field("Preset-Typ", presetTypeSelect("preset_type"))}
-        ${field("Einheit", `<input name="preset_unit" value="Portion">`)}
-        ${field("Basis-Menge", `<input type="number" name="preset_base_quantity" min="0.01" step="0.01" value="1">`)}
+      ${entry ? "" : `
+        <label class="check-row">
+          <input id="quick-save-preset" type="checkbox" name="quick_save_preset">
+          Als Preset speichern
+        </label>
+        <div id="quick-preset-fields" class="form-grid" hidden>
+          ${field("Preset-Typ", presetTypeSelect("preset_type"))}
+          ${field("Einheit", `<input name="preset_unit" value="Portion">`)}
+          ${field("Basis-Menge", `<input type="number" name="preset_base_quantity" min="0.01" step="0.01" value="1">`)}
+        </div>
+      `}
+      <div class="button-row">
+        <button class="btn primary" type="submit">${entry ? "Eintrag aktualisieren" : "Schnelleintrag speichern"}</button>
+        ${entry ? `<button class="btn ghost" type="button" data-action="cancel-food-entry-edit">Abbrechen</button>` : ""}
       </div>
-      <button class="btn primary" type="submit">Schnelleintrag speichern</button>
     </form>
   `;
 }
@@ -1707,6 +1776,40 @@ function renderBarcodeScanForm() {
       <div class="button-row" style="margin-top: 10px;">
         <button class="btn primary" type="submit">Eintragen</button>
         <button class="btn ghost" type="button" data-action="cancel-barcode-scan">Neu scannen</button>
+      </div>
+    </form>
+  `;
+}
+
+function renderImportEntryForm() {
+  if (!importedEntry) {
+    return `
+      <div class="empty">
+        Noch kein Eintrag importiert.
+        <div class="button-row" style="margin-top: 10px;">
+          <button class="btn primary" type="button" data-action="open-import-scanner">📷 Eintrag importieren</button>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <form id="import-food-form">
+      <div class="form-grid">
+        ${field("Name", `<input name="name" value="${attr(importedEntry.name)}" required>`)}
+        ${field("Mahlzeit", mealSelect("meal", importedEntry.meal || ""))}
+        ${field("kcal", `<input type="number" name="calories_kcal" min="0" step="0.1" value="${attr(importedEntry.calories_kcal)}" required>`)}
+        ${field("Protein g", `<input type="number" name="protein_g" min="0" step="0.1" value="${attr(importedEntry.protein_g)}" required>`)}
+        ${field("KH g", `<input type="number" name="carbs_g" min="0" step="0.1" value="${attr(importedEntry.carbs_g)}" required>`)}
+        ${field("Fett g", `<input type="number" name="fat_g" min="0" step="0.1" value="${attr(importedEntry.fat_g)}" required>`)}
+        ${field("Ballaststoffe g", `<input type="number" name="fiber_g" min="0" step="0.1" value="${attr(importedEntry.fiber_g ?? "")}">`)}
+        ${field("Zucker g", `<input type="number" name="sugar_g" min="0" step="0.1" value="${attr(importedEntry.sugar_g ?? "")}">`)}
+        ${field("Salz g", `<input type="number" name="salt_g" min="0" step="0.1" value="${attr(importedEntry.salt_g ?? "")}">`)}
+        ${field("Notiz", `<textarea name="notes">${safe(importedEntry.notes || "")}</textarea>`, "full")}
+      </div>
+      <div class="button-row" style="margin-top: 10px;">
+        <button class="btn primary" type="submit">Eintragen</button>
+        <button class="btn ghost" type="button" data-action="cancel-import-scan">Neu scannen</button>
       </div>
     </form>
   `;
@@ -1785,7 +1888,9 @@ function renderFoodEntriesForDate(date) {
                     <p class="list-row-meta">${fmt(entry.protein_g, 1)}g Protein · ${fmt(entry.carbs_g, 1)}g KH · ${fmt(entry.fat_g, 1)}g Fett${entry.notes ? ` · ${safe(entry.notes)}` : ""}</p>
                   </div>
                   <div class="list-actions">
+                    <button class="btn small ghost" type="button" data-action="edit-food" data-id="${attr(entry.id)}">Bearbeiten</button>
                     <button class="btn small danger" type="button" data-action="delete-food" data-id="${attr(entry.id)}">Löschen</button>
+                    <button class="btn small ghost" type="button" data-action="share-food" data-id="${attr(entry.id)}">Eintrag teilen</button>
                   </div>
                 </div>
               `).join("")}
@@ -1979,27 +2084,32 @@ function updateBarcodeFormFromQuantity() {
   }
 }
 
-async function openBarcodeOverlay() {
+async function openBarcodeOverlay(mode = "barcode") {
+  scanMode = mode;
   const overlay = document.querySelector("#barcode-overlay");
   const video = document.querySelector("#barcode-video");
   const statusEl = document.querySelector("#barcode-status");
+  const centerText = scanMode === "import" ? "QR-Code im Bild zentrieren..." : "Barcode im Bild zentrieren...";
   overlay.hidden = false;
   statusEl.textContent = "Kamera wird gestartet...";
+
+  const handleDetected = (value) => (scanMode === "import" ? handleImportQrDetected(value) : handleBarcodeDetected(value));
 
   try {
     if ("BarcodeDetector" in window) {
       barcodeStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
       video.srcObject = barcodeStream;
       await video.play();
-      const detector = new BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e"] });
-      statusEl.textContent = "Barcode im Bild zentrieren...";
+      const formats = scanMode === "import" ? ["qr_code"] : ["ean_13", "ean_8", "upc_a", "upc_e"];
+      const detector = new BarcodeDetector({ formats });
+      statusEl.textContent = centerText;
 
       const scanLoop = async () => {
         if (overlay.hidden) return;
         try {
           const codes = await detector.detect(video);
           if (codes.length) {
-            await handleBarcodeDetected(codes[0].rawValue);
+            await handleDetected(codes[0].rawValue);
             return;
           }
         } catch {
@@ -2010,10 +2120,10 @@ async function openBarcodeOverlay() {
       scanLoop();
     } else {
       await loadZXingScript();
-      statusEl.textContent = "Barcode im Bild zentrieren...";
+      statusEl.textContent = centerText;
       const reader = new ZXingBrowser.BrowserMultiFormatReader();
       zxingControls = await reader.decodeFromVideoDevice(undefined, video, (result) => {
-        if (result) handleBarcodeDetected(result.getText());
+        if (result) handleDetected(result.getText());
       });
     }
   } catch (error) {
@@ -2084,6 +2194,118 @@ async function handleBarcodeDetected(barcode) {
   } catch (error) {
     statusEl.textContent = error.message || "Produkt nicht gefunden.";
   }
+}
+
+async function handleImportQrDetected(rawText) {
+  const statusEl = document.querySelector("#barcode-status");
+  try {
+    const payload = JSON.parse(rawText);
+    if (payload.type !== "fittrack_food_entry") throw new Error("Kein FitTrack-Eintrag.");
+
+    importedEntry = {
+      name: payload.name || "Importierter Eintrag",
+      meal: payload.meal || "",
+      quantity: toNumber(payload.quantity) || 1,
+      unit: payload.unit || "Portion",
+      calories_kcal: toNumber(payload.calories_kcal) || 0,
+      protein_g: toNumber(payload.protein_g) || 0,
+      carbs_g: toNumber(payload.carbs_g) || 0,
+      fat_g: toNumber(payload.fat_g) || 0,
+      fiber_g: payload.fiber_g != null ? toNumber(payload.fiber_g) : null,
+      sugar_g: payload.sugar_g != null ? toNumber(payload.sugar_g) : null,
+      salt_g: payload.salt_g != null ? toNumber(payload.salt_g) : null,
+      notes: payload.notes || "",
+    };
+
+    closeBarcodeOverlay();
+    state.caloriePanel = "import";
+    await render();
+  } catch {
+    statusEl.textContent = "QR-Code ungültig oder kein FitTrack-Eintrag.";
+  }
+}
+
+async function shareFoodEntry(id) {
+  const entry = data.food_entries.find((item) => item.id === id);
+  if (!entry) return;
+
+  const payload = JSON.stringify({
+    type: "fittrack_food_entry",
+    v: 1,
+    name: entry.name,
+    meal: entry.meal,
+    quantity: entry.quantity,
+    unit: entry.unit,
+    calories_kcal: entry.calories_kcal,
+    protein_g: entry.protein_g,
+    carbs_g: entry.carbs_g,
+    fat_g: entry.fat_g,
+    fiber_g: entry.fiber_g,
+    sugar_g: entry.sugar_g,
+    salt_g: entry.salt_g,
+    notes: entry.notes,
+  });
+
+  await openShareOverlay(payload, entry.name);
+}
+
+async function openShareOverlay(text, title) {
+  const overlay = document.querySelector("#share-overlay");
+  const titleEl = document.querySelector("#share-title");
+  const container = document.querySelector("#share-qr-canvas");
+  titleEl.textContent = title || "Eintrag teilen";
+  overlay.hidden = false;
+  container.innerHTML = "";
+
+  try {
+    await loadQrCodeScript();
+    new window.QRCode(container, {
+      text,
+      width: 240,
+      height: 240,
+      correctLevel: window.QRCode.CorrectLevel.M,
+    });
+  } catch (error) {
+    overlay.hidden = true;
+    showToast(error.message || "QR-Code konnte nicht erzeugt werden.");
+  }
+}
+
+function closeShareOverlay() {
+  const overlay = document.querySelector("#share-overlay");
+  if (overlay) overlay.hidden = true;
+}
+
+function loadQrCodeScript() {
+  if (window.QRCode) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("QR-Library konnte nicht geladen werden."));
+    document.head.appendChild(script);
+  });
+}
+
+async function saveImportedFood(form) {
+  const name = formValue(form, "name");
+  if (!name) throw new Error("Bitte Name eintragen.");
+
+  const entry = buildFoodEntryFromForm(form, {
+    id: generateId("food"),
+    date: state.selectedDate,
+    name,
+    meal: formValue(form, "meal"),
+    quantity: importedEntry?.quantity ?? 1,
+    unit: importedEntry?.unit ?? "Portion",
+    preset_id: null,
+  });
+
+  await putItem("food_entries", entry);
+  importedEntry = null;
+  state.caloriePanel = "quick";
+  showToast("Eintrag importiert.");
+  await render();
 }
 
 function autoFillCardio(changedId) {

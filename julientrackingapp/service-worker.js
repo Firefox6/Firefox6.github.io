@@ -1,4 +1,4 @@
-const APP_VERSION = "2026-07-29-pwa-shortcuts";
+const APP_VERSION = "2026-07-29-share-import-entries";
 const APP_CACHE = `fittrack-app-shell-${APP_VERSION}`;
 const APP_CACHE_PREFIX = "fittrack-app-shell-";
 
