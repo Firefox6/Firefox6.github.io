@@ -8,7 +8,7 @@
  * Update laden.
  */
 
-const CACHE_VERSION = "fussball-tracker-v2";
+const CACHE_VERSION = "fussball-tracker-v4";
 const APP_SHELL = [
   "./",
   "./index.html",
