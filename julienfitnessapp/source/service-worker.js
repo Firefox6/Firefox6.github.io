@@ -1,6 +1,6 @@
-const CACHE = "fittrack-v3";
+const CACHE = "fittrack-v4";
 const BASE_URL = new URL("./", self.registration.scope);
-const ASSETS = ["", "index.html", "styles.css", "src/app.js", "src/data/demo-data.js", "src/scores/score-config.js", "src/scores/calculate.js", "src/bridge/shell-adapter.js", "src/health/health-adapter.js"]
+const ASSETS = ["", "index.html", "styles.css", "src/app.js", "src/data/demo-data.js", "src/scores/score-config.js", "src/scores/calculate.js", "src/bridge/shell-adapter.js", "src/health/health-adapter.js", "src/health/normalization.js", "src/storage/derived-cache.js"]
   .map((path) => new URL(path, BASE_URL).toString());
 
 self.addEventListener("install", (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())));

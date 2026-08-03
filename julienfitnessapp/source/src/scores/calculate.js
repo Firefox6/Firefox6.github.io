@@ -20,6 +20,7 @@ export function calculateRecovery(factors) {
 }
 
 export function scoreState(value, type = "recovery") {
+  if (!Number.isFinite(value)) return { label: "Daten fehlen", tone: "neutral", level: -1 };
   // Load uses its own training-zone cutoffs: a daily load of 36 is moderate,
   // while Recovery and Sleep retain the shared 0–39/40–59/60–79/80–100 bands.
   const level = type === "load"
