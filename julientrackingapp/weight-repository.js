@@ -117,19 +117,37 @@ export async function migrateLegacyWeightEntries(entries) {
     }));
 
   let migratedCount = 0;
+  let skippedCount = 0;
   const client = await getSupabaseClient();
   for (let start = 0; start < rows.length; start += 100) {
     const chunk = rows.slice(start, start + 100);
-    const { error } = await client.from(TABLE).upsert(chunk, { onConflict: "user_id,external_id" });
-    if (error) {
-      const failure = new Error(error.message || "Migration der Gewichtsdaten fehlgeschlagen.");
+    const externalIds = chunk.map((row) => row.external_id);
+    const { data: existingRows, error: lookupError } = await client
+      .from(TABLE)
+      .select("external_id")
+      .eq("user_id", user.id)
+      .in("external_id", externalIds);
+    if (lookupError) {
+      const failure = new Error(lookupError.message || "Bestehende Gewichtsdaten konnten nicht geprüft werden.");
       failure.migratedCount = migratedCount;
       throw failure;
     }
-    migratedCount += chunk.length;
+
+    const existingIds = new Set((existingRows || []).map((row) => row.external_id));
+    const missingRows = chunk.filter((row) => !existingIds.has(row.external_id));
+    skippedCount += chunk.length - missingRows.length;
+    if (!missingRows.length) continue;
+
+    const { error: insertError } = await client.from(TABLE).insert(missingRows);
+    if (insertError) {
+      const failure = new Error(insertError.message || "Migration der Gewichtsdaten fehlgeschlagen.");
+      failure.migratedCount = migratedCount;
+      throw failure;
+    }
+    migratedCount += missingRows.length;
   }
 
-  return { migratedCount, total: rows.length };
+  return { migratedCount, skippedCount, total: rows.length };
 }
 
 export async function exportCloudWeights() {
