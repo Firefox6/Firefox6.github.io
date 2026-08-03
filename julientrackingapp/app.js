@@ -1144,6 +1144,10 @@ async function submitCloudLogin(form) {
   state.authStatus = getAuthState();
   await refreshWeightData();
   await loadLegacyWeightMigrationCandidate();
+  // The auth listener normally opens this dialog as well. Calling it here
+  // makes the migration prompt reliable even if the listener has already
+  // fired before the legacy rows finished loading.
+  showLegacyWeightMigrationDialog();
   showToast("Mit Supabase verbunden.");
   await render();
 }
@@ -1722,6 +1726,14 @@ function buildChatGptDailyContext() {
 }
 
 async function copyChatGptDailyContextToClipboard() {
+  // The daily ChatGPT export must not depend on whether the initial background
+  // sync has already completed. Refresh the in-memory daily series first so
+  // the context contains the current Supabase weights whenever cloud access is
+  // available; nutrition export still works if the request fails.
+  if (state.authStatus.status === "authenticated") {
+    await refreshWeightData();
+  }
+
   const context = buildChatGptDailyContext();
   const json = JSON.stringify(context, null, 2);
   const platform = getPlatformKind();
