@@ -98,6 +98,7 @@ const state = {
   weightError: null,
   lastWeightSyncAt: null,
   legacyWeightEntries: [],
+  discardedLegacyBodyMeasurements: 0,
 };
 
 let data = {
@@ -228,6 +229,7 @@ async function initializeCloud() {
       state.weightLoading = false;
       state.lastWeightSyncAt = null;
       state.legacyWeightEntries = [];
+      state.discardedLegacyBodyMeasurements = 0;
       await render();
     }
   });
@@ -758,6 +760,7 @@ function showLegacyWeightMigrationDialog() {
       <h2 id="legacy-weight-migration-title">Lokale Gewichtsdaten gefunden</h2>
       <p>${fmt(state.legacyWeightEntries.length, 0)} lokale Gewichtseinträge können jetzt in dein Supabase-Konto übertragen werden.</p>
       <p class="section-note">Beim Übertragen erhalten alle Einträge die Quelle <code>legacy_import</code>. Alternativ kannst du die lokalen Altgewichte dauerhaft löschen.</p>
+      ${state.discardedLegacyBodyMeasurements ? `<p class="section-note">${fmt(state.discardedLegacyBodyMeasurements, 0)} alte Körpermessungen wurden nicht importiert, da sie nicht mehr Teil der Nutrition-App sind.</p>` : ""}
       <div class="button-row">
         <button class="btn primary" type="button" data-legacy-dialog-action="migrate">Nach Supabase übertragen</button>
         <button class="btn danger" type="button" data-legacy-dialog-action="delete">Lokal löschen</button>
@@ -797,6 +800,7 @@ async function migrateCurrentLegacyWeights() {
   });
   await clearStagedLegacyWeightEntries();
   state.legacyWeightEntries = [];
+  state.discardedLegacyBodyMeasurements = 0;
   await refreshWeightData();
   showToast(`${fmt(result.migratedCount, 0)} Gewichtseinträge als Legacy-Import übertragen.`);
   await render();
@@ -811,6 +815,7 @@ async function deleteCurrentLegacyWeights() {
     discarded_at: toLocalIso(),
   });
   state.legacyWeightEntries = [];
+  state.discardedLegacyBodyMeasurements = 0;
   showToast(`${fmt(deletedCount, 0)} lokale Gewichtseinträge gelöscht.`);
   await render();
 }
@@ -1412,22 +1417,32 @@ async function importData(form) {
     showToast("Nutrition-Daten zusammengeführt.");
   }
 
+  state.discardedLegacyBodyMeasurements = result?.legacyWeightEntries?.length
+    ? (result.ignoredBodyMeasurementsCount || 0)
+    : 0;
   if (result?.legacyWeightEntries?.length) {
     await stageLegacyWeightImport(result.legacyWeightEntries);
     if (state.authStatus.status === "authenticated") {
       await loadLegacyWeightMigrationCandidate();
       showLegacyWeightMigrationDialog();
     } else {
-      showImportLegacyDataNotice(result.legacyWeightEntries.length, result.ignoredWorkoutsCount);
+      showImportLegacyDataNotice(
+        result.legacyWeightEntries.length,
+        result.ignoredWorkoutsCount,
+        result.ignoredBodyMeasurementsCount,
+      );
     }
-  } else if (result?.ignoredWorkoutsCount) {
-    showToast(`${fmt(result.ignoredWorkoutsCount, 0)} alte Workout-Einträge wurden nicht importiert.`);
+  } else {
+    const ignored = [];
+    if (result?.ignoredWorkoutsCount) ignored.push(`${fmt(result.ignoredWorkoutsCount, 0)} alte Workout-Einträge`);
+    if (result?.ignoredBodyMeasurementsCount) ignored.push(`${fmt(result.ignoredBodyMeasurementsCount, 0)} Körpermessungen`);
+    if (ignored.length) showToast(`${ignored.join(" und ")} wurden nicht importiert.`);
   }
 
   await render();
 }
 
-function showImportLegacyDataNotice(weightCount, workoutCount) {
+function showImportLegacyDataNotice(weightCount, workoutCount, bodyMeasurementCount = 0) {
   document.querySelector("#legacy-import-notice")?.remove();
   const dialog = document.createElement("div");
   dialog.id = "legacy-import-notice";
@@ -1436,7 +1451,8 @@ function showImportLegacyDataNotice(weightCount, workoutCount) {
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="legacy-import-title">
       <h2 id="legacy-import-title">Alte Backup-Daten erkannt</h2>
       <p>${fmt(weightCount, 0)} Gewichtseinträge können nach Anmeldung zu Supabase übertragen werden.</p>
-      <p class="section-note">${fmt(workoutCount || 0, 0)} alte Workout-Einträge wurden nicht importiert, da Training nicht mehr Bestandteil der Nutrition-App ist.</p>
+      ${workoutCount ? `<p class="section-note">${fmt(workoutCount, 0)} alte Workout-Einträge wurden nicht importiert, da Training nicht mehr Bestandteil der Nutrition-App ist.</p>` : ""}
+      ${bodyMeasurementCount ? `<p class="section-note">${fmt(bodyMeasurementCount, 0)} alte Körpermessungen wurden gelöscht, da sie nicht mehr Teil der Nutrition-App sind.</p>` : ""}
       <div class="button-row"><button class="btn primary" type="button" data-dialog-close>Verstanden</button></div>
     </div>
   `;

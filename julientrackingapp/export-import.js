@@ -67,7 +67,7 @@ export function validateImportData(data) {
   }
 
   const version = Number(data.schema_version);
-  if (![1, 2, 3].includes(version)) {
+  if (![1, 2, 3].includes(version) && !looksLikeLegacyImport(data)) {
     throw new Error("Schema-Version nicht unterstützt.");
   }
 
@@ -115,14 +115,16 @@ export async function mergeImportData(data, options = {}) {
 
 function normalizeImportData(data) {
   validateImportData(data);
+  const version = Number(data.schema_version);
 
   return {
     schema_version: SCHEMA_VERSION,
     settings: cleanSettingsForExport(data.settings || {}),
     food_entries: asArray(data.food_entries),
     food_presets: asArray(data.food_presets),
-    legacy_weight_entries: Number(data.schema_version) < 3 ? asArray(data.weight_entries) : [],
-    ignored_workouts_count: Number(data.schema_version) < 3 ? asArray(data.workouts).length : 0,
+    legacy_weight_entries: extractLegacyWeightEntries(data),
+    ignored_workouts_count: version < 3 || looksLikeLegacyImport(data) ? asArray(data.workouts).length : 0,
+    ignored_body_measurements_count: countLegacyBodyMeasurements(data),
   };
 }
 
@@ -131,7 +133,68 @@ function importResult(counts, normalized) {
     counts,
     legacyWeightEntries: normalized.legacy_weight_entries,
     ignoredWorkoutsCount: normalized.ignored_workouts_count,
+    ignoredBodyMeasurementsCount: normalized.ignored_body_measurements_count,
   };
+}
+
+function extractLegacyWeightEntries(data) {
+  const fields = ["weight_entries", "weight_measurements", "weights", "weightMeasurements"];
+  const normalized = [];
+
+  for (const field of fields) {
+    for (const [index, entry] of asArray(data[field]).entries()) {
+      const row = normalizeLegacyWeightEntry(entry, field, index);
+      if (row) normalized.push(row);
+    }
+  }
+
+  const byId = new Map();
+  for (const row of normalized) byId.set(row.id, row);
+  return [...byId.values()];
+}
+
+function normalizeLegacyWeightEntry(entry, field, index) {
+  if (!entry || typeof entry !== "object") return null;
+  const date = dateKeyFromLegacyValue(entry.date || entry.measured_at || entry.measuredAt || entry.timestamp || entry.created_at);
+  const weight = Number(entry.weight_kg ?? entry.weightKg ?? entry.weight ?? entry.value_kg);
+  if (!date || !Number.isFinite(weight) || weight <= 0) return null;
+
+  const sourceId = entry.id || entry.external_id || `legacy-${field}-${date}-${weight}-${index}`;
+  return {
+    id: String(sourceId),
+    date,
+    weight_kg: weight,
+    created_at: entry.created_at || entry.createdAt || null,
+    updated_at: entry.updated_at || entry.updatedAt || entry.source_modified_at || null,
+  };
+}
+
+function dateKeyFromLegacyValue(value) {
+  if (typeof value !== "string") return null;
+  const match = value.match(/^\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : null;
+}
+
+function countLegacyBodyMeasurements(data) {
+  return ["body_measurements", "bodyMeasurements", "body_measurement_entries", "circumference_entries"]
+    .reduce((count, field) => count + asArray(data[field]).length, 0);
+}
+
+function looksLikeLegacyImport(data) {
+  return [
+    "settings",
+    "weight_entries",
+    "weight_measurements",
+    "weights",
+    "weightMeasurements",
+    "food_entries",
+    "food_presets",
+    "workouts",
+    "body_measurements",
+    "bodyMeasurements",
+    "body_measurement_entries",
+    "circumference_entries",
+  ].some((key) => key in data);
 }
 
 function cleanSettingsForExport(settings) {

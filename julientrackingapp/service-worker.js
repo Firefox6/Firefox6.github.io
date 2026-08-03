@@ -1,4 +1,4 @@
-const APP_VERSION = "2026-08-03-nutrition-cloud-weight-v4";
+const APP_VERSION = "2026-08-03-legacy-json-import-v5";
 const APP_CACHE = `fittrack-app-shell-${APP_VERSION}`;
 const APP_CACHE_PREFIX = "fittrack-app-shell-";
 
