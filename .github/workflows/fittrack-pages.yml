@@ -1,0 +1,65 @@
+name: Publish FitTrack and GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "julienfitnessapp/**"
+      - ".github/workflows/fittrack-pages.yml"
+      - ".github/scripts/build-fittrack-release.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "github-pages"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout website repository
+        uses: actions/checkout@v6
+
+      - name: Set up GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build signed FitTrack release
+        env:
+          FITTRACK_WEB_RELEASE_PRIVATE_KEY: ${{ secrets.FITTRACK_WEB_RELEASE_PRIVATE_KEY }}
+        run: node .github/scripts/build-fittrack-release.mjs
+
+      - name: Assemble full existing website
+        run: |
+          mkdir -p .published-site/julienfitnessapp
+          rsync -a --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '.fittrack-release' \
+            --exclude '.published-site' \
+            --exclude 'julienfitnessapp' \
+            ./ .published-site/
+          rsync -a --delete .fittrack-release/web/ .published-site/julienfitnessapp/
+          cp .fittrack-release/app-manifest.json .published-site/julienfitnessapp/app-manifest.json
+          cp -R .fittrack-release/bundles .published-site/julienfitnessapp/bundles
+          touch .published-site/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: .published-site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
