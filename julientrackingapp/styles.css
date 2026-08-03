@@ -199,8 +199,7 @@ h3 {
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }
 
-.dashboard-layout,
-.training-layout {
+.dashboard-layout {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -394,8 +393,7 @@ h3 {
 
 .today-actions,
 .button-row,
-.pill-row,
-.training-mini {
+.pill-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -565,8 +563,7 @@ h3 {
   font-size: 0.8rem;
 }
 
-.pill,
-.check-chip {
+.pill {
   display: inline-flex;
   align-items: center;
   min-height: 30px;
@@ -579,8 +576,7 @@ h3 {
   font-weight: 800;
 }
 
-.pill.ok,
-.check-chip.is-done {
+.pill.ok {
   border-color: color-mix(in srgb, var(--ok) 38%, var(--line));
   background: color-mix(in srgb, var(--ok) 12%, var(--surface-2));
   color: var(--ok);
@@ -590,10 +586,6 @@ h3 {
   border-color: color-mix(in srgb, var(--warn) 42%, var(--line));
   background: color-mix(in srgb, var(--warn) 13%, var(--surface-2));
   color: var(--warn);
-}
-
-.training-mini {
-  margin-top: 16px;
 }
 
 .btn,
@@ -677,7 +669,7 @@ h3 {
   left: 0;
   z-index: 30;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 4px;
   width: min(1120px, 100%);
   margin: 0 auto;
@@ -759,83 +751,10 @@ form > button {
   margin-top: 14px;
 }
 
-.check-row,
-.training-toggle {
+.check-row {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.training-check-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.training-toggle {
-  min-height: 86px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  padding: 14px;
-  cursor: pointer;
-}
-
-.training-toggle input {
-  position: absolute;
-  width: 1px;
-  min-height: 0;
-  height: 1px;
-  margin: 0;
-  padding: 0;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.toggle-box {
-  display: grid;
-  flex: 0 0 34px;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--bg-elevated);
-}
-
-.toggle-box::after {
-  width: 16px;
-  height: 9px;
-  border-bottom: 3px solid #071512;
-  border-left: 3px solid #071512;
-  transform: rotate(-45deg) translate(1px, -1px) scale(0.72);
-  opacity: 0;
-  content: "";
-}
-
-.training-toggle.is-checked {
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
-}
-
-.training-toggle.is-checked .toggle-box {
-  border-color: transparent;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-}
-
-.training-toggle.is-checked .toggle-box::after {
-  opacity: 1;
-}
-
-.training-toggle strong,
-.training-toggle small {
-  display: block;
-}
-
-.training-toggle small {
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 0.82rem;
 }
 
 .list {
@@ -888,6 +807,50 @@ form > button {
   color: var(--muted);
   padding: 14px;
   text-align: center;
+}
+
+.cloud-account-card {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--line));
+}
+
+.cloud-empty-state {
+  display: grid;
+  gap: 14px;
+  justify-items: start;
+}
+
+.inline-notice {
+  margin: 14px 0 0;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
+  color: var(--muted);
+  padding: 10px 12px;
+  font-size: 0.88rem;
+  line-height: 1.38;
+}
+
+.inline-notice.warn {
+  border-left-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, var(--surface-2));
+}
+
+.migration-callout {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+.migration-callout strong {
+  display: block;
+  font-size: 0.98rem;
+}
+
+.migration-callout p {
+  max-width: 68ch;
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.4;
 }
 
 .chart-canvas {
@@ -1055,9 +1018,6 @@ form > button {
     grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
   }
 
-  .training-layout {
-    grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
-  }
 }
 
 @media (max-width: 720px) {
@@ -1065,8 +1025,7 @@ form > button {
   .grid.three,
   .form-grid,
   .form-grid.three,
-  .primary-progress-grid,
-  .training-check-grid {
+  .primary-progress-grid {
     grid-template-columns: 1fr;
   }
 

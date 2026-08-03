@@ -3,14 +3,20 @@
   generateId,
   getAll,
   getItem,
+  getLegacyWeightEntries,
   getMeta,
   getSettings,
+  getStagedLegacyWeightEntries,
   migrateLegacyLocalStorageData,
   putItem,
   saveSettings,
   setMeta,
+  stageLegacyWeightImport,
+  clearStagedLegacyWeightEntries,
+  deleteLegacyWeightEntries,
   todayKey,
   toLocalIso,
+  WEIGHT_SUPABASE_MIGRATION_KEY,
 } from "./db.js";
 import {
   addDays,
@@ -24,7 +30,6 @@ import {
   calculateWeightChartSeries,
   calculateWeeklyAverageWeight,
   calculateWeeklyCaloriePool,
-  calculateWeeklyTrainingStats,
   formatDateKey,
   getBMICategory,
   getIsoWeekKey,
@@ -38,6 +43,22 @@ import {
   readJsonFile,
   replaceAllData,
 } from "./export-import.js";
+import {
+  getAuthState,
+  initializeAuth,
+  loginWithPassword,
+  logout,
+  testCloudConnection,
+} from "./auth-service.js";
+import {
+  createManualWeightMeasurement,
+  deleteManualWeightMeasurement,
+  exportCloudWeights,
+  getDailyWeightSeries,
+  migrateLegacyWeightEntries,
+  updateManualWeightMeasurement,
+} from "./weight-repository.js";
+import { isSupabaseConfigured } from "./supabase-client.js";
 
 const app = document.querySelector("#app");
 const screenTitle = document.querySelector("#screen-title");
@@ -51,7 +72,6 @@ const TAB_TITLES = {
   dashboard: "Dashboard",
   weight: "Gewicht",
   calories: "Kalorien",
-  training: "Training",
   more: "Mehr",
 };
 
@@ -65,22 +85,19 @@ const MEALS = [
   { value: "", label: "Ohne Mahlzeit" },
 ];
 
-const STORE_LABELS = {
-  weight_entries: "Gewicht",
-  food_entries: "Kalorien",
-  food_presets: "Food-Presets",
-  workouts: "Trainings",
-};
-
 const state = {
   tab: "dashboard",
   selectedDate: todayKey(),
-  trainingDate: todayKey(),
   caloriePanel: "quick",
   weightEditId: null,
   foodPresetEditId: null,
   foodEntryEditId: null,
   waitingServiceWorker: null,
+  authStatus: { status: "checking", user: null, error: null },
+  weightLoading: false,
+  weightError: null,
+  lastWeightSyncAt: null,
+  legacyWeightEntries: [],
 };
 
 let data = {
@@ -88,7 +105,6 @@ let data = {
   weight_entries: [],
   food_entries: [],
   food_presets: [],
-  workouts: [],
 };
 
 let toastTimer = null;
@@ -110,6 +126,7 @@ async function init() {
     showToast("Alte lokale Daten wurden sicher übernommen.");
   }
   await render();
+  await initializeCloud();
   registerServiceWorker();
 
   if (launchAction === "barcode") {
@@ -185,26 +202,85 @@ function bindEvents() {
 }
 
 async function loadData() {
-  const [settings, weights, foods, foodPresets, workouts] = await Promise.all([
+  const [settings, foods, foodPresets] = await Promise.all([
     getSettings(),
-    getAll("weight_entries"),
     getAll("food_entries"),
     getAll("food_presets"),
-    getAll("workouts"),
   ]);
 
   return {
     settings,
-    weight_entries: weights.sort((a, b) => (a.date || "").localeCompare(b.date || "")),
     food_entries: foods.sort((a, b) => `${a.date || ""}${a.created_at || ""}`.localeCompare(`${b.date || ""}${b.created_at || ""}`)),
     food_presets: foodPresets.sort((a, b) => (a.name || "").localeCompare(b.name || "")),
-    workouts: normalizeStoredWorkouts(workouts),
   };
 }
 
-async function refreshData() {
-  data = await loadData();
-  return data;
+async function initializeCloud() {
+  state.authStatus = await initializeAuth(async (nextStatus) => {
+    state.authStatus = nextStatus;
+    if (nextStatus.status === "authenticated") {
+      await refreshWeightData({ renderAfter: true });
+      await loadLegacyWeightMigrationCandidate();
+      showLegacyWeightMigrationDialog();
+    } else {
+      data.weight_entries = [];
+      state.weightError = null;
+      state.weightLoading = false;
+      state.lastWeightSyncAt = null;
+      state.legacyWeightEntries = [];
+      await render();
+    }
+  });
+
+  if (state.authStatus.status === "authenticated") {
+    await refreshWeightData({ renderAfter: true });
+    await loadLegacyWeightMigrationCandidate();
+    showLegacyWeightMigrationDialog();
+  } else {
+    await render();
+  }
+}
+
+async function refreshWeightData({ renderAfter = false } = {}) {
+  if (state.authStatus.status !== "authenticated") {
+    data.weight_entries = [];
+    state.weightLoading = false;
+    if (renderAfter) await render();
+    return;
+  }
+
+  state.weightLoading = true;
+  state.weightError = null;
+  if (renderAfter) await render();
+
+  try {
+    data.weight_entries = await getDailyWeightSeries();
+    state.lastWeightSyncAt = toLocalIso();
+  } catch (error) {
+    state.weightError = error.message || "Gewichtsdaten konnten nicht mit Supabase verbunden werden.";
+  } finally {
+    state.weightLoading = false;
+  }
+
+  if (renderAfter) await render();
+}
+
+async function loadLegacyWeightMigrationCandidate() {
+  if (state.authStatus.status !== "authenticated") return;
+  const [migration, staged] = await Promise.all([
+    getMeta(WEIGHT_SUPABASE_MIGRATION_KEY),
+    getStagedLegacyWeightEntries(),
+  ]);
+  const stored = migration?.value?.status === "completed"
+    ? []
+    : await getLegacyWeightEntries();
+  const byExternalId = new Map();
+  for (const entry of [...stored, ...staged]) {
+    if (!entry?.date || toNumber(entry.weight_kg) === null) continue;
+    const key = entry.id || `${entry.date}:${entry.weight_kg}:${entry.updated_at || entry.created_at || ""}`;
+    byExternalId.set(key, entry);
+  }
+  state.legacyWeightEntries = [...byExternalId.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
 
 async function render() {
@@ -212,7 +288,7 @@ async function render() {
   const nextData = await loadData();
   if (token !== renderToken) return;
 
-  data = nextData;
+  data = { ...data, ...nextData };
   applyTheme(data.settings);
   screenTitle.textContent = TAB_TITLES[state.tab] || "Dashboard";
   document.querySelectorAll(".nav-item").forEach((button) => {
@@ -223,7 +299,6 @@ async function render() {
     dashboard: renderDashboardV2,
     weight: renderWeight,
     calories: renderCaloriesV2,
-    training: renderTrainingV2,
     more: renderMoreV2,
   }[state.tab]();
 
@@ -249,9 +324,7 @@ function renderDashboardV2() {
   const today = todayKey();
   const goals = data.settings.goals;
   const nutrition = calculateDailyNutrition(data.food_entries, today);
-  const todayTraining = getTrainingCompletion(today);
   const weightStats = buildWeightStats();
-  const trainingStats = calculateWeeklyTrainingStats(data.workouts, today).thisWeek;
   const avgCalories7 = average(lastNDays(today, 7).map((date) => calculateDailyNutrition(data.food_entries, date).calories_kcal));
   const caloriePool = calculateWeeklyCaloriePool(data.food_entries, goals.calorie_goal_kcal, today).pool;
   const effectiveCalorieGoal = (toNumber(goals.calorie_goal_kcal) || 0) + caloriePool;
@@ -319,12 +392,7 @@ function renderDashboardV2() {
           ${renderProgressRow("Kalorien", nutrition.calories_kcal, effectiveCalorieGoal, "kcal", { kind: "calories" })}
           ${renderProgressRow("Protein", nutrition.protein_g, goals.protein_goal_g, "g", { kind: "protein" })}
         </div>
-        <p class="section-note" style="margin-top: 10px;">${autoTdee.available ? `Dein berechneter Ø Verbrauch (letzte 21 Tage) liegt bei ca. ${fmt(autoTdee.tdee, 0)} kcal.` : "Noch nicht genug Daten für einen berechneten Verbrauch (Gewicht und Kalorien über mehrere Wochen erfassen)."}</p>
-
-        <div class="training-mini">
-          <span class="check-chip ${todayTraining.strength ? "is-done" : ""}">Kraft ${todayTraining.strength ? "erledigt" : "offen"}</span>
-          <span class="check-chip ${todayTraining.cardio ? "is-done" : ""}">Cardio ${todayTraining.cardio ? "erledigt" : "offen"}</span>
-        </div>
+        <p class="section-note" style="margin-top: 10px;">${autoTdeeMessage(autoTdee)}</p>
       </article>
 
       <article class="card">
@@ -346,7 +414,7 @@ function renderDashboardV2() {
 
     <section class="grid auto">
       ${renderMetricCard("7 Tage Kcal", fmt(avgCalories7, 0), "Schnitt")}
-      ${renderMetricCard("Diese Woche", `${fmt(trainingStats.total, 0)} Tage`, `${fmt(trainingStats.strength, 0)} Kraft / ${fmt(trainingStats.cardio, 0)} Cardio`)}
+      ${renderMetricCard("Wochen-Pool", `${caloriePool >= 0 ? "+" : ""}${fmt(caloriePool, 0)} kcal`, "bis heute")}
       ${renderMetricCard("Aktuell", weightStats.latest ? `${fmt(weightStats.latest.weight_kg, 1)} kg` : "-", weightStats.latest ? formatDate(weightStats.latest.date) : "Noch kein Eintrag")}
       ${renderMetricCard("Seit Start", weightStats.diffStart !== null ? `${fmtSigned(weightStats.diffStart, 1)} kg` : "-", "Gewicht")}
     </section>
@@ -358,12 +426,37 @@ function renderDashboardV2() {
           <p class="section-note">Tagesgewicht (schwach) und 7-Tage-Schnitt (kräftig). Zum Scrollen wischen.</p>
         </div>
       </div>
-      <div class="chart-scroll" data-chart-scroll="dashboard-weight">
-        <canvas class="chart-canvas" data-chart="dashboard-weight" aria-label="Gewichtsverlauf mit 7-Tage-Schnitt"></canvas>
-      </div>
+      ${renderWeightChartOrStatus()}
     </section>
   `;
 }
+
+function renderWeightChartOrStatus() {
+  if (state.authStatus.status !== "authenticated") {
+    return `<div class="empty">Für Gewichtsdaten bei Supabase anmelden.</div>`;
+  }
+  if (state.weightLoading && !data.weight_entries.length) {
+    return `<div class="empty">Gewichtsdaten werden geladen …</div>`;
+  }
+  if (state.weightError && !data.weight_entries.length) {
+    return `<div class="empty">Gewichtsdaten konnten nicht mit Supabase verbunden werden. Dein Kalorientracking funktioniert weiterhin lokal.</div>`;
+  }
+  return `
+    <div class="chart-scroll" data-chart-scroll="dashboard-weight">
+      <canvas class="chart-canvas" data-chart="dashboard-weight" aria-label="Gewichtsverlauf mit 7-Tage-Schnitt"></canvas>
+    </div>
+  `;
+}
+
+function autoTdeeMessage(autoTdee) {
+  if (state.authStatus.status !== "authenticated") return "Für die Berechnung werden Cloud-Gewichtsdaten benötigt.";
+  if (state.weightLoading) return "Cloud-Gewichte werden für Auto-TDEE geladen …";
+  if (state.weightError && !data.weight_entries.length) return "Für die Berechnung werden Cloud-Gewichtsdaten benötigt.";
+  return autoTdee.available
+    ? `Dein berechneter Ø Verbrauch (letzte 21 Tage) liegt bei ca. ${fmt(autoTdee.tdee, 0)} kcal.`
+    : "Noch nicht genug Daten für einen berechneten Verbrauch (Gewicht und Kalorien über mehrere Wochen erfassen).";
+}
+
 function renderCaloriesV2() {
   const goals = data.settings.goals;
   const nutrition = calculateDailyNutrition(data.food_entries, state.selectedDate);
@@ -402,7 +495,7 @@ function renderCaloriesV2() {
       </div>
       <div class="grid two">
         ${renderMetric("Kcal", goalValueText(nutrition.calories_kcal, effectiveCalorieGoal, "kcal", 0), calorieBalanceText(nutrition.calories_kcal, effectiveCalorieGoal))}
-        ${renderMetric("Protein", goalValueText(nutrition.protein_g, goals.protein_goal_g, "g", 0), proteinPerKg ? `${fmt(proteinPerKg, 2)} g/kg` : "Gewicht fehlt")}
+        ${renderMetric("Protein", goalValueText(nutrition.protein_g, goals.protein_goal_g, "g", 0), proteinPerKg ? `${fmt(proteinPerKg, 2)} g/kg` : "Gewicht nicht verfügbar.")}
         ${renderMetric("KH", goalValueText(nutrition.carbs_g, goals.carbs_goal_g, "g", 0), optionalGoalSub(nutrition.carbs_g, goals.carbs_goal_g))}
         ${renderMetric("Fett", goalValueText(nutrition.fat_g, goals.fat_goal_g, "g", 0), optionalGoalSub(nutrition.fat_g, goals.fat_goal_g))}
       </div>
@@ -436,47 +529,6 @@ function renderCaloriesV2() {
   `;
 }
 
-function renderTrainingV2() {
-  const weekly = calculateWeeklyTrainingStats(data.workouts, state.trainingDate).thisWeek;
-  const goals = data.settings.goals;
-  const completion = getTrainingCompletion(state.trainingDate);
-
-  return `
-    <section class="card training-check-card">
-      <div class="section-head">
-        <div>
-          <h2>Training abhaken</h2>
-          <p class="section-note">${formatDate(state.trainingDate)}</p>
-        </div>
-        <div class="field" style="min-width: 170px;">
-          <label for="training-date">Datum</label>
-          <input id="training-date" type="date" value="${attr(state.trainingDate)}">
-        </div>
-      </div>
-
-      <div class="training-check-grid">
-        ${renderTrainingToggle("strength", "Krafttraining", completion.strength)}
-        ${renderTrainingToggle("cardio", "Cardio", completion.cardio)}
-      </div>
-    </section>
-
-    <section class="grid two">
-      ${renderTrainingGoalCard("Kraft", weekly.strength, goals.strength_goal_per_week)}
-      ${renderTrainingGoalCard("Cardio", weekly.cardio, goals.cardio_goal_per_week)}
-    </section>
-
-    <section class="card">
-      <div class="section-head">
-        <div>
-          <h2>Verlauf</h2>
-          <p class="section-note">Neueste Haken zuerst.</p>
-        </div>
-      </div>
-      ${renderSimpleWorkoutList()}
-    </section>
-  `;
-}
-
 function renderMoreV2() {
   const settings = data.settings;
   const age = calculateAge(settings.profile.birth_date);
@@ -486,8 +538,10 @@ function renderMoreV2() {
       ${renderMetricCard("Alter", age !== null ? fmt(age, 0) : "–", "aus Geburtsdatum")}
       ${renderMetricCard("Grösse", settings.profile.height_cm ? `${fmt(settings.profile.height_cm, 0)} cm` : "–", "Profil")}
       ${renderMetricCard("Kalorienziel", goalSummary(settings.goals.calorie_goal_kcal, "kcal"), "primär")}
-      ${renderMetricCard("Daten", `${data.weight_entries.length + data.food_entries.length + data.workouts.length}`, "Einträge")}
+      ${renderMetricCard("Lokale Daten", `${data.food_entries.length + data.food_presets.length}`, "Einträge & Presets")}
     </section>
+
+    ${renderCloudAccount()}
 
     <section class="card">
       <h2>Darstellung</h2>
@@ -534,8 +588,6 @@ function renderMoreV2() {
           ${field("Zucker-Maximum g", `<input type="number" name="sugar_max_g" min="0" step="1" value="${attr(settings.goals.sugar_max_g ?? "")}">`)}
           ${field("Salz-Maximum g", `<input type="number" name="salt_max_g" min="0" step="0.1" value="${attr(settings.goals.salt_max_g ?? "")}">`)}
           ${field("Zielgewicht kg", `<input type="number" name="weight_goal_kg" min="0" step="0.1" value="${attr(settings.goals.weight_goal_kg ?? "")}">`)}
-          ${field("Kraft/Woche", `<input type="number" name="strength_goal_per_week" min="0" step="1" value="${attr(settings.goals.strength_goal_per_week ?? "")}">`)}
-          ${field("Cardio/Woche", `<input type="number" name="cardio_goal_per_week" min="0" step="1" value="${attr(settings.goals.cardio_goal_per_week ?? "")}">`)}
         </div>
         <button class="btn primary" type="submit">Ziele speichern</button>
       </form>
@@ -590,7 +642,8 @@ function renderMoreV2() {
           ${notificationFocusCheckbox("fiber", "Ballaststoffe", settings.notifications.focus)}
           ${notificationFocusCheckbox("sugar", "Zucker", settings.notifications.focus)}
           ${notificationFocusCheckbox("salt", "Salz", settings.notifications.focus)}
-          ${notificationFocusCheckbox("training", "Training (Erledigt Haken)", settings.notifications.focus)}
+          ${notificationFocusCheckbox("weight", "Gewichtsstand", settings.notifications.focus)}
+          ${notificationFocusCheckbox("auto_tdee", "Auto-TDEE-Verfügbarkeit", settings.notifications.focus)}
         </div>
         <button class="btn primary" type="submit" style="margin-top: 14px;">Benachrichtigungen speichern</button>
       </form>
@@ -600,14 +653,12 @@ function renderMoreV2() {
       <div class="section-head">
         <div>
           <h2>Daten</h2>
-          <p class="section-note">Bereinigter JSON-Export und kompatibler Import.</p>
+          <p class="section-note">Lokaler Nutrition-Export ohne Gewicht und ohne Trainingsdaten.</p>
         </div>
       </div>
       <div class="grid auto">
-        ${renderMetric("Gewicht", fmt(data.weight_entries.length, 0), "Einträge")}
         ${renderMetric("Kalorien", fmt(data.food_entries.length, 0), "Einträge")}
         ${renderMetric("Food-Presets", fmt(data.food_presets.length, 0), "gespeichert")}
-        ${renderMetric("Trainings", fmt(data.workouts.filter((workout) => ["strength", "cardio"].includes(workout.type)).length, 0), "Haken")}
       </div>
       <div class="button-row" style="margin-top: 14px;">
         <button class="btn primary" type="button" data-action="export-json">JSON exportieren</button>
@@ -629,10 +680,155 @@ function renderMoreV2() {
   `;
 }
 
+function renderCloudAccount() {
+  const status = state.authStatus;
+  const isSignedIn = status.status === "authenticated";
+  const isConfigured = isSupabaseConfigured();
+  const statusText = isSignedIn
+    ? "Verbunden"
+    : status.status === "checking"
+      ? "Verbindung wird geprüft …"
+      : status.status === "unavailable"
+        ? "Einrichtung fehlt"
+      : "Nicht angemeldet";
+
+  return `
+    <section class="card cloud-account-card">
+      <div class="section-head">
+        <div>
+          <h2>Cloud-Konto</h2>
+          <p class="section-note">Gewicht wird ausschliesslich in Supabase gespeichert. Kalorien bleiben lokal auf diesem Gerät.</p>
+        </div>
+        <span class="pill ${isSignedIn ? "ok" : ""}">${safe(statusText)}</span>
+      </div>
+      ${isSignedIn ? `
+        <div class="grid auto">
+          ${renderMetric("Konto", status.user?.email || "–", "Supabase")}
+          ${renderMetric("Letzte Gewichtsabfrage", state.lastWeightSyncAt ? formatDateTime(state.lastWeightSyncAt) : "–", state.weightLoading ? "wird aktualisiert" : "Cloud")}
+        </div>
+        ${state.weightError ? `<p class="inline-notice warn">${safe(state.weightError)} Dein Kalorientracking funktioniert weiterhin lokal.</p>` : ""}
+        <div class="button-row" style="margin-top: 14px;">
+          <button class="btn ghost" type="button" data-action="test-cloud-connection">Verbindung testen</button>
+          <button class="btn primary" type="button" data-action="refresh-cloud-weights" ${state.weightLoading ? "disabled" : ""}>${state.weightLoading ? "Aktualisiere …" : "Gewichte aktualisieren"}</button>
+          <button class="btn ghost" type="button" data-action="export-cloud-weights">Cloud-Gewichte exportieren</button>
+          <button class="btn danger" type="button" data-action="logout-cloud">Abmelden</button>
+        </div>
+        ${renderLegacyWeightMigration()}
+      ` : `
+        <p class="inline-notice">Gewicht wird noch nicht geladen. Melde dich an, um deinen gemeinsamen Gewichtsverlauf zu sehen.</p>
+        ${status.error ? `<p class="inline-notice warn">${safe(status.error)}</p>` : ""}
+        <form id="cloud-login-form">
+          <div class="form-grid">
+            ${field("E-Mail", `<input type="email" name="email" autocomplete="email" required ${isConfigured ? "" : "disabled"}>`)}
+            ${field("Passwort", `<input type="password" name="password" autocomplete="current-password" required ${isConfigured ? "" : "disabled"}>`)}
+          </div>
+          <button class="btn primary" type="submit" ${isConfigured ? "" : "disabled"}>Anmelden</button>
+        </form>
+      `}
+    </section>
+  `;
+}
+
+function renderLegacyWeightMigration() {
+  const entries = state.legacyWeightEntries;
+  if (!entries.length) return "";
+
+  return `
+    <div class="migration-callout">
+      <strong>${fmt(entries.length, 0)} lokale Gewichtseinträge gefunden.</strong>
+      <p>Diese Einträge werden künftig zentral in Supabase gespeichert, damit Nutrition- und Fitness-App dieselben Daten verwenden.</p>
+      <div class="button-row">
+        <button class="btn primary" type="button" data-action="migrate-legacy-weights">Nach Supabase übertragen</button>
+        <button class="btn ghost" type="button" data-action="download-legacy-weights">Vorher als JSON herunterladen</button>
+        <button class="btn danger" type="button" data-action="delete-legacy-weights">Lokal löschen</button>
+      </div>
+    </div>
+  `;
+}
+
+function showLegacyWeightMigrationDialog() {
+  if (state.authStatus.status !== "authenticated" || !state.legacyWeightEntries.length) return;
+  if (document.querySelector("#legacy-weight-migration-dialog")) return;
+
+  const dialog = document.createElement("div");
+  dialog.id = "legacy-weight-migration-dialog";
+  dialog.className = "modal-backdrop";
+  dialog.innerHTML = `
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="legacy-weight-migration-title">
+      <h2 id="legacy-weight-migration-title">Lokale Gewichtsdaten gefunden</h2>
+      <p>${fmt(state.legacyWeightEntries.length, 0)} lokale Gewichtseinträge können jetzt in dein Supabase-Konto übertragen werden.</p>
+      <p class="section-note">Beim Übertragen erhalten alle Einträge die Quelle <code>legacy_import</code>. Alternativ kannst du die lokalen Altgewichte dauerhaft löschen.</p>
+      <div class="button-row">
+        <button class="btn primary" type="button" data-legacy-dialog-action="migrate">Nach Supabase übertragen</button>
+        <button class="btn danger" type="button" data-legacy-dialog-action="delete">Lokal löschen</button>
+        <button class="btn ghost" type="button" data-legacy-dialog-action="close">Später entscheiden</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+
+  dialog.addEventListener("click", async (event) => {
+    const action = event.target.closest("[data-legacy-dialog-action]")?.dataset.legacyDialogAction;
+    if (!action) return;
+    if (action === "close") {
+      dialog.remove();
+      return;
+    }
+
+    try {
+      if (action === "migrate") await migrateCurrentLegacyWeights();
+      if (action === "delete") {
+        if (!confirm("Lokale Altgewichte dauerhaft löschen? Dieser Schritt kann nicht rückgängig gemacht werden.")) return;
+        await deleteCurrentLegacyWeights();
+      }
+      dialog.remove();
+    } catch (error) {
+      showToast(error.message || "Migration fehlgeschlagen.");
+    }
+  });
+}
+
+async function migrateCurrentLegacyWeights() {
+  const result = await migrateLegacyWeightEntries(state.legacyWeightEntries);
+  await setMeta(WEIGHT_SUPABASE_MIGRATION_KEY, {
+    status: "completed",
+    migrated_count: result.migratedCount,
+    completed_at: toLocalIso(),
+  });
+  await clearStagedLegacyWeightEntries();
+  state.legacyWeightEntries = [];
+  await refreshWeightData();
+  showToast(`${fmt(result.migratedCount, 0)} Gewichtseinträge als Legacy-Import übertragen.`);
+  await render();
+}
+
+async function deleteCurrentLegacyWeights() {
+  const deletedCount = state.legacyWeightEntries.length;
+  await deleteLegacyWeightEntries();
+  await setMeta(WEIGHT_SUPABASE_MIGRATION_KEY, {
+    status: "discarded",
+    deleted_count: deletedCount,
+    discarded_at: toLocalIso(),
+  });
+  state.legacyWeightEntries = [];
+  showToast(`${fmt(deletedCount, 0)} lokale Gewichtseinträge gelöscht.`);
+  await render();
+}
+
 function renderWeight() {
   const stats = buildWeightStats();
   const editEntry = state.weightEditId ? data.weight_entries.find((entry) => entry.id === state.weightEditId) : null;
-  const entry = editEntry || { date: todayKey(), weight_kg: "", notes: "" };
+  const entry = editEntry || { date: todayKey(), weight_kg: "" };
+
+  if (state.authStatus.status !== "authenticated") {
+    return `
+      <section class="card cloud-empty-state">
+        <h2>Gewicht in der Cloud</h2>
+        <p class="section-note">Für Gewichtsdaten bei Supabase anmelden. Dein Kalorientracking funktioniert weiterhin vollständig lokal.</p>
+        <button class="btn primary" type="button" data-action="open-cloud-account">Cloud-Konto öffnen</button>
+      </section>
+    `;
+  }
 
   return `
     <section class="grid auto">
@@ -649,16 +845,15 @@ function renderWeight() {
       <div class="section-head">
         <div>
           <h2>${editEntry ? "Gewicht bearbeiten" : "+ Gewicht eintragen"}</h2>
-          <p class="section-note">Ein Datum wird aktualisiert, wenn es schon vorhanden ist.</p>
+          <p class="section-note">Heute mit aktueller Uhrzeit, vergangene Tage standardmässig um 12:00 Uhr.</p>
         </div>
         ${editEntry ? `<button class="btn ghost small" type="button" data-action="cancel-weight-edit">Abbrechen</button>` : ""}
       </div>
       <form id="weight-form">
-        <input type="hidden" name="existing_id" value="${attr(editEntry?.id || "")}">
+        <input type="hidden" name="remote_id" value="${attr(editEntry?.remote_id || "")}">
         <div class="form-grid">
           ${field("Datum", `<input type="date" name="date" value="${attr(entry.date)}" required>`)}
           ${field("Gewicht kg", `<input type="number" name="weight_kg" inputmode="decimal" step="0.1" min="1" value="${attr(entry.weight_kg)}" required>`)}
-          ${field("Notiz", `<textarea name="notes">${safe(entry.notes || "")}</textarea>`, "full")}
         </div>
         <button class="btn primary" type="submit">Speichern</button>
       </form>
@@ -689,7 +884,11 @@ async function handleActionClick(event) {
     }
 
     if (action === "delete-weight") {
-      await confirmDelete("Gewichtseintrag löschen?", async () => deleteItem("weight_entries", button.dataset.id));
+      await confirmDelete("Gewichtseintrag löschen?", async () => {
+        await deleteManualWeightMeasurement(button.dataset.id);
+        state.weightEditId = null;
+        await refreshWeightData();
+      });
     }
 
     if (action === "set-calorie-panel") {
@@ -776,10 +975,6 @@ async function handleActionClick(event) {
       });
     }
 
-    if (action === "delete-workout") {
-      await confirmDelete("Training löschen?", async () => deleteItem("workouts", button.dataset.id));
-    }
-
     if (action === "export-json") {
       await exportAndMarkBackup();
     }
@@ -793,6 +988,63 @@ async function handleActionClick(event) {
       await updateReminderDate("last_backup_at");
       showToast("Backup-Erinnerung zurückgesetzt.");
     }
+
+    if (action === "open-cloud-account") {
+      state.tab = "more";
+      await render();
+    }
+
+    if (action === "logout-cloud") {
+      await logout();
+      state.authStatus = getAuthState();
+      data.weight_entries = [];
+      state.weightError = null;
+      state.lastWeightSyncAt = null;
+      state.weightEditId = null;
+      showToast("Von Supabase abgemeldet.");
+      await render();
+    }
+
+    if (action === "test-cloud-connection") {
+      await testCloudConnection();
+      showToast("Supabase-Verbindung funktioniert.");
+    }
+
+    if (action === "refresh-cloud-weights") {
+      await refreshWeightData({ renderAfter: true });
+      if (state.weightError) throw new Error(state.weightError);
+      showToast("Gewichte aktualisiert.");
+    }
+
+    if (action === "export-cloud-weights") {
+      const weights = await exportCloudWeights();
+      downloadJson({
+        schema_version: 1,
+        type: "fittrack_cloud_weights",
+        exported_at: toLocalIso(),
+        weight_measurements: weights,
+      }, `fittrack-cloud-weights-${todayKey()}.json`);
+      showToast("Cloud-Gewichte exportiert.");
+    }
+
+    if (action === "download-legacy-weights") {
+      downloadJson({
+        schema_version: 1,
+        type: "fittrack_legacy_weights",
+        exported_at: toLocalIso(),
+        weight_entries: state.legacyWeightEntries,
+      }, `fittrack-legacy-weights-${todayKey()}.json`);
+      showToast("Lokale Gewichtseinträge exportiert.");
+    }
+
+    if (action === "migrate-legacy-weights") {
+      await migrateCurrentLegacyWeights();
+    }
+
+    if (action === "delete-legacy-weights") {
+      if (!confirm("Lokale Altgewichte dauerhaft löschen? Dieser Schritt kann nicht rückgängig gemacht werden.")) return;
+      await deleteCurrentLegacyWeights();
+    }
   } catch (error) {
     showToast(error.message || "Aktion fehlgeschlagen.");
   }
@@ -804,6 +1056,7 @@ async function handleSubmit(event) {
 
   try {
     if (form.id === "weight-form") await saveWeightEntry(form);
+    if (form.id === "cloud-login-form") await submitCloudLogin(form);
     if (form.id === "quick-food-form") await saveQuickFood(form);
     if (form.id === "preset-food-form") await saveFoodFromPreset(form);
     if (form.id === "food-preset-form") await saveFoodPreset(form);
@@ -828,15 +1081,6 @@ async function handleChange(event) {
     if (target.id === "calories-date") {
       state.selectedDate = target.value || todayKey();
       await render();
-    }
-
-    if (target.id === "training-date") {
-      state.trainingDate = target.value || todayKey();
-      await render();
-    }
-
-    if (target.matches("[data-training-toggle]")) {
-      await setTrainingCompletion(state.trainingDate, target.dataset.trainingToggle, target.checked);
     }
 
     if (target.id === "quick-save-preset") {
@@ -877,21 +1121,25 @@ async function saveWeightEntry(form) {
   const weight = requiredPositiveNumber(form, "weight_kg", "Bitte Gewicht eintragen.");
   if (!date) throw new Error("Bitte Datum eintragen.");
 
-  const id = `weight_${date}`;
-  const existing = await getItem("weight_entries", id);
-  const now = toLocalIso();
-
-  await putItem("weight_entries", {
-    id,
-    date,
-    weight_kg: weight,
-    notes: formValue(form, "notes"),
-    created_at: existing?.created_at || now,
-    updated_at: now,
-  });
+  const remoteId = formValue(form, "remote_id");
+  if (remoteId) {
+    await updateManualWeightMeasurement(remoteId, { date, weight_kg: weight });
+  } else {
+    await createManualWeightMeasurement({ date, weight_kg: weight });
+  }
 
   state.weightEditId = null;
+  await refreshWeightData();
   showToast("Gewicht gespeichert.");
+  await render();
+}
+
+async function submitCloudLogin(form) {
+  await loginWithPassword(formValue(form, "email"), formValue(form, "password"));
+  state.authStatus = getAuthState();
+  await refreshWeightData();
+  await loadLegacyWeightMigrationCandidate();
+  showToast("Mit Supabase verbunden.");
   await render();
 }
 
@@ -1083,6 +1331,8 @@ async function saveGoalSettings(form) {
     settings.goals[key] = optionalNonNegativeNumber(form, key, "Ziele dürfen nicht negativ sein.");
   }
   delete settings.goals.training_days_goal_per_week;
+  delete settings.goals.strength_goal_per_week;
+  delete settings.goals.cardio_goal_per_week;
   await saveSettings(settings);
   showToast("Ziele gespeichert.");
   await render();
@@ -1129,6 +1379,7 @@ async function saveNotificationSettings(form) {
   for (const key of Object.keys(settings.notifications.focus)) {
     settings.notifications.focus[key] = form.elements.namedItem(`focus_${key}`)?.checked || false;
   }
+  delete settings.notifications.focus.training;
 
   if (!wasEnabled && (dailyEnabled || weeklyEnabled) && "Notification" in window) {
     await Notification.requestPermission();
@@ -1145,22 +1396,54 @@ async function importData(form) {
   if (!file) throw new Error("Bitte Import-Datei wählen.");
 
   const parsed = await readJsonFile(file);
+  let result;
 
   if (mode === "replace") {
     const ok = confirm("Alles ersetzen? Vorher wird ein aktueller Export zum Download angeboten.");
     if (!ok) return;
     await downloadFullExport();
-    await replaceAllData(parsed);
-    showToast("Daten ersetzt.");
+    result = await replaceAllData(parsed);
+    showToast("Nutrition-Daten ersetzt.");
   } else if (mode === "presets") {
-    await mergeImportData(parsed, { presetsOnly: true });
+    result = await mergeImportData(parsed, { presetsOnly: true });
     showToast("Presets importiert.");
   } else {
-    await mergeImportData(parsed);
-    showToast("Daten zusammengeführt.");
+    result = await mergeImportData(parsed);
+    showToast("Nutrition-Daten zusammengeführt.");
+  }
+
+  if (result?.legacyWeightEntries?.length) {
+    await stageLegacyWeightImport(result.legacyWeightEntries);
+    if (state.authStatus.status === "authenticated") {
+      await loadLegacyWeightMigrationCandidate();
+      showLegacyWeightMigrationDialog();
+    } else {
+      showImportLegacyDataNotice(result.legacyWeightEntries.length, result.ignoredWorkoutsCount);
+    }
+  } else if (result?.ignoredWorkoutsCount) {
+    showToast(`${fmt(result.ignoredWorkoutsCount, 0)} alte Workout-Einträge wurden nicht importiert.`);
   }
 
   await render();
+}
+
+function showImportLegacyDataNotice(weightCount, workoutCount) {
+  document.querySelector("#legacy-import-notice")?.remove();
+  const dialog = document.createElement("div");
+  dialog.id = "legacy-import-notice";
+  dialog.className = "modal-backdrop";
+  dialog.innerHTML = `
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="legacy-import-title">
+      <h2 id="legacy-import-title">Alte Backup-Daten erkannt</h2>
+      <p>${fmt(weightCount, 0)} Gewichtseinträge können nach Anmeldung zu Supabase übertragen werden.</p>
+      <p class="section-note">${fmt(workoutCount || 0, 0)} alte Workout-Einträge wurden nicht importiert, da Training nicht mehr Bestandteil der Nutrition-App ist.</p>
+      <div class="button-row"><button class="btn primary" type="button" data-dialog-close>Verstanden</button></div>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+  dialog.addEventListener("click", (event) => {
+    if (event.target.closest("[data-dialog-close]")) dialog.remove();
+  });
 }
 
 async function exportAndMarkBackup() {
@@ -1299,7 +1582,8 @@ function buildDailyReviewText() {
   const today = todayKey();
   const nutrition = calculateDailyNutrition(data.food_entries, today);
   const pool = calculateWeeklyCaloriePool(data.food_entries, goals.calorie_goal_kcal, today).pool;
-  const training = getTrainingCompletion(today);
+  const weightStats = buildWeightStats();
+  const autoTdee = calculateAutoTdee(data.weight_entries, data.food_entries, today);
   const parts = [];
 
   if (focus.calories) parts.push(`${fmt(nutrition.calories_kcal, 0)} / ${fmt(goals.calorie_goal_kcal, 0)} kcal (Pool ${pool >= 0 ? "+" : ""}${fmt(pool, 0)})`);
@@ -1309,7 +1593,8 @@ function buildDailyReviewText() {
   if (focus.fiber) parts.push(`${fmt(nutrition.fiber_g, 0)}g Ballaststoffe`);
   if (focus.sugar) parts.push(`${fmt(nutrition.sugar_g, 0)}g Zucker`);
   if (focus.salt) parts.push(`${fmt(nutrition.salt_g, 1)}g Salz`);
-  if (focus.training) parts.push(`Kraft ${training.strength ? "erledigt" : "offen"} · Cardio ${training.cardio ? "erledigt" : "offen"}`);
+  if (focus.weight && weightStats.latest) parts.push(`${fmt(weightStats.latest.weight_kg, 1)} kg`);
+  if (focus.auto_tdee) parts.push(autoTdee.available ? `Auto-TDEE ${fmt(autoTdee.tdee, 0)} kcal` : "Auto-TDEE: Gewichtsdaten fehlen");
 
   return parts.join(" | ") || "Review verfügbar.";
 }
@@ -1320,12 +1605,12 @@ function buildWeeklyReviewText() {
   const today = todayKey();
   const weightStats = buildWeightStats();
   const pool = calculateWeeklyCaloriePool(data.food_entries, goals.calorie_goal_kcal, today).pool;
-  const trainingStats = calculateWeeklyTrainingStats(data.workouts, today).thisWeek;
+  const autoTdee = calculateAutoTdee(data.weight_entries, data.food_entries, today);
   const parts = [];
 
   if (focus.calories) parts.push(`Rest-Pool ${pool >= 0 ? "+" : ""}${fmt(pool, 0)} kcal`);
-  if (focus.protein && weightStats.avg7) parts.push(`Ø ${fmt(weightStats.avg7, 1)} kg`);
-  if (focus.training) parts.push(`${fmt(trainingStats.strength, 0)}x Kraft, ${fmt(trainingStats.cardio, 0)}x Cardio`);
+  if (focus.weight && weightStats.avg7) parts.push(`Ø ${fmt(weightStats.avg7, 1)} kg`);
+  if (focus.auto_tdee && autoTdee.available) parts.push(`Auto-TDEE ${fmt(autoTdee.tdee, 0)} kcal`);
 
   return parts.join(" | ") || "Wochen-Review verfügbar.";
 }
@@ -1402,9 +1687,6 @@ function buildChatGptDailyContext() {
     today_food: data.food_entries
       .filter((entry) => entry.date === today)
       .map(cleanFoodForChatGpt),
-    today_training: data.workouts
-      .filter((workout) => workout.date === today)
-      .map(cleanWorkoutForChatGpt),
     recent_weight: {
       latest: weightStats.latest
         ? {
@@ -1418,7 +1700,7 @@ function buildChatGptDailyContext() {
     },
     instructions: {
       preferred_response_language: "de-CH",
-      task: "Hilf mir, den Rest des Tages bezüglich Kalorien, Protein und Training sinnvoll zu planen. Sei direkt und praktisch. Berücksichtige, was heute bereits gegessen und trainiert wurde. Gib konkrete Vorschläge für Mahlzeiten, Snack-Optionen und Prioritäten.",
+      task: "Hilf mir, den Rest des Tages bezüglich Kalorien und Protein sinnvoll zu planen. Sei direkt und praktisch. Berücksichtige, was heute bereits gegessen wurde. Gib konkrete Vorschläge für Mahlzeiten, Snack-Optionen und Prioritäten.",
     },
   };
 }
@@ -1542,8 +1824,6 @@ function buildChatGptGoals(goals, settings) {
     sugar_max_g: nullIfEmpty(goals.sugar_max_g),
     salt_max_g: nullIfEmpty(goals.salt_max_g),
     weight_goal_kg: nullIfEmpty(goals.weight_goal_kg),
-    strength_per_week: nullIfEmpty(goals.strength_goal_per_week),
-    cardio_per_week: nullIfEmpty(goals.cardio_goal_per_week),
     estimated_maintenance_kcal_range: {
       min: nullIfEmpty(settings.maintenance.min_kcal),
       max: nullIfEmpty(settings.maintenance.max_kcal),
@@ -1646,14 +1926,6 @@ function mealLabel(mealValue) {
   return MEALS.find((meal) => meal.value === mealValue)?.label || "Ohne Mahlzeit";
 }
 
-function cleanWorkoutForChatGpt(workout) {
-  return {
-    type: workout.type || "",
-    name: workoutTypeLabel(workout.type),
-    completed: true,
-  };
-}
-
 function diffSince(entries, endDate, days) {
   const target = formatDateKey(addDays(parseDateKey(endDate), -days));
   const previous = [...entries].reverse().find((entry) => entry.date <= target);
@@ -1668,7 +1940,11 @@ function normalizeSex(sex) {
 
 function renderWeightHistory() {
   const entries = [...data.weight_entries].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  if (!entries.length) return `<div class="empty">Noch keine Gewichtseinträge.</div>`;
+  if (!entries.length) {
+    if (state.weightLoading) return `<div class="empty">Gewichtsdaten werden geladen …</div>`;
+    if (state.weightError) return `<div class="empty">Gewichtsdaten konnten nicht mit Supabase verbunden werden. Dein Kalorientracking funktioniert weiterhin lokal.</div>`;
+    return `<div class="empty">Noch keine Cloud-Gewichtseinträge.</div>`;
+  }
 
   return `
     <div class="list">
@@ -1676,16 +1952,26 @@ function renderWeightHistory() {
         <div class="list-row">
           <div>
             <p class="list-row-title">${formatDate(entry.date)} · ${fmt(entry.weight_kg, 1)} kg</p>
-            <p class="list-row-meta">${entry.notes ? safe(entry.notes) : "Keine Notiz"}</p>
+            <p class="list-row-meta">Quelle: ${safe(weightSourceLabel(entry.source))}</p>
           </div>
           <div class="list-actions">
-            <button class="btn small ghost" type="button" data-action="edit-weight" data-id="${attr(entry.id)}">Bearbeiten</button>
-            <button class="btn small danger" type="button" data-action="delete-weight" data-id="${attr(entry.id)}">Löschen</button>
+            ${entry.can_edit ? `
+              <button class="btn small ghost" type="button" data-action="edit-weight" data-id="${attr(entry.id)}">Bearbeiten</button>
+              <button class="btn small danger" type="button" data-action="delete-weight" data-id="${attr(entry.remote_id)}">Löschen</button>
+            ` : `<span class="pill">Nicht hier bearbeitbar</span>`}
           </div>
         </div>
       `).join("")}
     </div>
   `;
+}
+
+function weightSourceLabel(source) {
+  if (source === "manual_nutrition") return "manuell in Nutrition";
+  if (source === "manual_fitness") return "manuell in Fitness";
+  if (source === "health_connect") return "Health Connect";
+  if (source === "legacy_import") return "Legacy-Import";
+  return "andere Quelle";
 }
 
 function renderCaloriePanel() {
@@ -2308,25 +2594,6 @@ async function saveImportedFood(form) {
   await render();
 }
 
-function autoFillCardio(changedId) {
-  const durationInput = document.querySelector("#cardio-duration");
-  const distanceInput = document.querySelector("#cardio-distance");
-  const speedInput = document.querySelector("#cardio-speed");
-  const duration = toNumber(durationInput?.value);
-  const distance = toNumber(distanceInput?.value);
-  const speed = toNumber(speedInput?.value);
-
-  if (!duration || duration <= 0) return;
-
-  if (changedId !== "cardio-speed" && distance !== null && speedInput && !speedInput.value) {
-    speedInput.value = fmtRaw(distance / (duration / 60), 1);
-  }
-
-  if (changedId !== "cardio-distance" && speed !== null && distanceInput && !distanceInput.value) {
-    distanceInput.value = fmtRaw(speed * (duration / 60), 2);
-  }
-}
-
 function applyPresetTypeDefaults(type) {
   const unit = document.querySelector("#food-preset-unit");
   const base = document.querySelector("#food-preset-base");
@@ -2493,120 +2760,6 @@ function goalSummary(goal, unit) {
   return value && value > 0 ? `${fmt(value, 0)} ${unit}` : "nicht gesetzt";
 }
 
-function getTrainingCompletion(date) {
-  return {
-    strength: data.workouts.some((workout) => workout.date === date && workout.type === "strength"),
-    cardio: data.workouts.some((workout) => workout.date === date && workout.type === "cardio"),
-  };
-}
-
-function normalizeStoredWorkouts(workouts) {
-  const byDayAndType = new Map();
-
-  for (const workout of workouts || []) {
-    if (!workout?.date || !["strength", "cardio"].includes(workout.type)) continue;
-    const key = `${workout.date}_${workout.type}`;
-    const existing = byDayAndType.get(key);
-    if (!existing || (workout.updated_at || workout.created_at || "") >= (existing.updated_at || existing.created_at || "")) {
-      byDayAndType.set(key, {
-        id: workout.id || `workout_${workout.date}_${workout.type}`,
-        date: workout.date,
-        type: workout.type,
-        name: workout.type === "strength" ? "Krafttraining" : "Cardio",
-        completed: true,
-        created_at: workout.created_at || workout.updated_at || toLocalIso(),
-        updated_at: workout.updated_at || workout.created_at || toLocalIso(),
-      });
-    }
-  }
-
-  return [...byDayAndType.values()].sort((a, b) => `${a.date || ""}${a.type || ""}`.localeCompare(`${b.date || ""}${b.type || ""}`));
-}
-
-function renderTrainingToggle(type, label, checked) {
-  return `
-    <label class="training-toggle ${checked ? "is-checked" : ""}">
-      <input type="checkbox" data-training-toggle="${attr(type)}" ${checked ? "checked" : ""}>
-      <span class="toggle-box" aria-hidden="true"></span>
-      <span>
-        <strong>${safe(label)}</strong>
-        <small>${checked ? "Heute erledigt" : "Heute offen"}</small>
-      </span>
-    </label>
-  `;
-}
-
-function renderTrainingGoalCard(label, current, goal) {
-  const target = toNumber(goal) || 0;
-  const progress = target ? Math.min(100, (current / target) * 100) : 0;
-  return `
-    <article class="card">
-      <div class="kpi-row">
-        <div class="kpi-main">
-          <p class="kpi-title">${safe(label)} diese Woche</p>
-          <p class="kpi-sub">${target ? `${fmt(current, 0)} von ${fmt(target, 0)} Einheiten` : `${fmt(current, 0)} Einheiten · kein Ziel gesetzt`}</p>
-        </div>
-        <div class="kpi-value">${target ? `${fmt(progress, 0)}%` : "–"}</div>
-      </div>
-      <div class="progress ok" style="--value: ${progress}%"><span></span></div>
-    </article>
-  `;
-}
-
-async function setTrainingCompletion(date, type, completed) {
-  if (!date || !["strength", "cardio"].includes(type)) return;
-
-  const matching = data.workouts.filter((workout) => workout.date === date && workout.type === type);
-  if (!completed) {
-    for (const workout of matching) {
-      await deleteItem("workouts", workout.id);
-    }
-    showToast(type === "strength" ? "Krafttraining entfernt." : "Cardio entfernt.");
-    await render();
-    return;
-  }
-
-  if (!matching.length) {
-    const now = toLocalIso();
-    await putItem("workouts", {
-      id: `workout_${date}_${type}`,
-      date,
-      type,
-      name: type === "strength" ? "Krafttraining" : "Cardio",
-      completed: true,
-      created_at: now,
-      updated_at: now,
-    });
-  }
-
-  showToast(type === "strength" ? "Krafttraining erledigt." : "Cardio erledigt.");
-  await render();
-}
-
-function renderSimpleWorkoutList() {
-  const rows = data.workouts
-    .filter((workout) => ["strength", "cardio"].includes(workout.type))
-    .sort((a, b) => `${b.date || ""}${b.type || ""}`.localeCompare(`${a.date || ""}${a.type || ""}`));
-
-  if (!rows.length) return `<div class="empty">Noch keine Trainings.</div>`;
-
-  return `
-    <div class="list">
-      ${rows.map((workout) => `
-        <div class="list-row">
-          <div>
-            <p class="list-row-title">${formatDate(workout.date)} · ${safe(workoutTypeLabel(workout.type))}</p>
-            <p class="list-row-meta">Erledigt</p>
-          </div>
-          <div class="list-actions">
-            <button class="btn small danger" type="button" data-action="delete-workout" data-id="${attr(workout.id)}">Löschen</button>
-          </div>
-        </div>
-      `).join("")}
-    </div>
-  `;
-}
-
 function renderOptionalNutrition(nutrition) {
   return `
     <div class="pill-row">
@@ -2645,12 +2798,6 @@ function option(value, label, selected) {
 function presetTypeLabel(preset) {
   if (preset.type === "ingredient_100g") return `pro ${fmt(preset.base_quantity, 0)}${preset.unit || "g"}`;
   return `pro ${fmt(preset.base_quantity, 0)} ${preset.unit || "Stück"}`;
-}
-
-function workoutTypeLabel(type) {
-  if (type === "strength") return "Krafttraining";
-  if (type === "cardio") return "Cardio";
-  return "Training";
 }
 
 function calorieBalanceText(calories, goal) {
@@ -2734,12 +2881,6 @@ function fmt(value, digits = 0) {
   }).format(number);
 }
 
-function fmtRaw(value, digits = 0) {
-  const number = toNumber(value);
-  if (number === null) return "";
-  return number.toFixed(digits);
-}
-
 function fmtSigned(value, digits = 0) {
   const number = toNumber(value);
   if (number === null) return "–";
@@ -2762,13 +2903,16 @@ function formatDate(dateKey) {
   }).format(date);
 }
 
-function slugId(prefix, value) {
-  return `${prefix}_${String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "") || Date.now()}`;
+function formatDateTime(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "–";
+  return new Intl.DateTimeFormat("de-CH", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function safe(value) {

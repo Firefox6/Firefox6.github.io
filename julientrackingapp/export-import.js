@@ -1,5 +1,4 @@
 import {
-  clearStore,
   createDataSnapshot,
   getAll,
   getItem,
@@ -11,8 +10,8 @@ import {
   toLocalIso,
 } from "./db.js";
 
-const SCHEMA_VERSION = 2;
-const ACTIVE_DATA_STORES = ["weight_entries", "food_entries", "food_presets", "workouts"];
+const SCHEMA_VERSION = 3;
+const ACTIVE_DATA_STORES = ["food_entries", "food_presets"];
 const PRESET_STORES = ["food_presets"];
 
 export async function buildExportObject() {
@@ -21,16 +20,17 @@ export async function buildExportObject() {
     schema_version: SCHEMA_VERSION,
     exported_at: toLocalIso(),
     app: {
-      name: "FitTrack",
-      version: "2.0.0",
+      name: "FitTrack Nutrition",
+      version: "3.0.0",
     },
     settings,
+    remote_resources: {
+      weight_measurements: "supabase",
+    },
   };
 
-  data.weight_entries = await getAll("weight_entries");
   data.food_entries = await getAll("food_entries");
   data.food_presets = await getAll("food_presets");
-  data.workouts = normalizeWorkouts(await getAll("workouts"));
 
   return data;
 }
@@ -67,7 +67,7 @@ export function validateImportData(data) {
   }
 
   const version = Number(data.schema_version);
-  if (![1, 2].includes(version)) {
+  if (![1, 2, 3].includes(version)) {
     throw new Error("Schema-Version nicht unterstützt.");
   }
 
@@ -86,9 +86,7 @@ export async function replaceAllData(data) {
     await replaceStore(storeName, rows);
     counts[storeName] = rows.length;
   }
-  await clearStore("exercise_presets");
-
-  return counts;
+  return importResult(counts, normalized);
 }
 
 export async function mergeImportData(data, options = {}) {
@@ -112,7 +110,7 @@ export async function mergeImportData(data, options = {}) {
     }
   }
 
-  return counts;
+  return importResult(counts, normalized);
 }
 
 function normalizeImportData(data) {
@@ -121,10 +119,18 @@ function normalizeImportData(data) {
   return {
     schema_version: SCHEMA_VERSION,
     settings: cleanSettingsForExport(data.settings || {}),
-    weight_entries: asArray(data.weight_entries),
     food_entries: asArray(data.food_entries),
     food_presets: asArray(data.food_presets),
-    workouts: normalizeWorkouts(asArray(data.workouts)),
+    legacy_weight_entries: Number(data.schema_version) < 3 ? asArray(data.weight_entries) : [],
+    ignored_workouts_count: Number(data.schema_version) < 3 ? asArray(data.workouts).length : 0,
+  };
+}
+
+function importResult(counts, normalized) {
+  return {
+    counts,
+    legacyWeightEntries: normalized.legacy_weight_entries,
+    ignoredWorkoutsCount: normalized.ignored_workouts_count,
   };
 }
 
@@ -136,10 +142,14 @@ function cleanSettingsForExport(settings) {
     ...goals,
     carbs_goal_g: emptyToNull(goals.carbs_goal_g),
     fat_goal_g: emptyToNull(goals.fat_goal_g),
-    strength_goal_per_week: emptyToNull(goals.strength_goal_per_week),
-    cardio_goal_per_week: emptyToNull(goals.cardio_goal_per_week),
   };
   delete cleanGoals.training_days_goal_per_week;
+  delete cleanGoals.strength_goal_per_week;
+  delete cleanGoals.cardio_goal_per_week;
+
+  const notifications = source.notifications || {};
+  const focus = { ...(notifications.focus || {}) };
+  delete focus.training;
 
   return {
     ...source,
@@ -148,35 +158,11 @@ function cleanSettingsForExport(settings) {
       ...preferences,
       theme: ["system", "light", "dark"].includes(preferences.theme) ? preferences.theme : "system",
     },
+    notifications: {
+      ...notifications,
+      focus,
+    },
   };
-}
-
-function normalizeWorkouts(workouts) {
-  const byDayAndType = new Map();
-
-  for (const workout of workouts || []) {
-    if (!workout?.date || !["strength", "cardio"].includes(workout.type)) continue;
-
-    const key = `${workout.date}_${workout.type}`;
-    const existing = byDayAndType.get(key);
-    const createdAt = workout.created_at || workout.updated_at || toLocalIso();
-    const updatedAt = workout.updated_at || workout.created_at || createdAt;
-    const simpleWorkout = {
-      id: `workout_${workout.date}_${workout.type}`,
-      date: workout.date,
-      type: workout.type,
-      name: workout.type === "strength" ? "Krafttraining" : "Cardio",
-      completed: true,
-      created_at: createdAt,
-      updated_at: updatedAt,
-    };
-
-    if (!existing || isNewer(simpleWorkout, existing)) {
-      byDayAndType.set(key, simpleWorkout);
-    }
-  }
-
-  return [...byDayAndType.values()].sort((a, b) => `${a.date}${a.type}`.localeCompare(`${b.date}${b.type}`));
 }
 
 function emptyToNull(value) {

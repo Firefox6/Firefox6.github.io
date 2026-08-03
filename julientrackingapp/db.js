@@ -1,5 +1,5 @@
 export const DB_NAME = "julien_tracking_db";
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 
 export const STORE_NAMES = [
   "meta",
@@ -27,8 +27,6 @@ export const DEFAULT_SETTINGS = {
     sugar_max_g: null,
     salt_max_g: null,
     weight_goal_kg: 80,
-    strength_goal_per_week: null,
-    cardio_goal_per_week: null,
   },
   maintenance: {
     min_kcal: 2400,
@@ -56,13 +54,19 @@ export const DEFAULT_SETTINGS = {
       fiber: false,
       sugar: false,
       salt: false,
-      training: true,
+      weight: true,
+      auto_tdee: false,
     },
   },
 };
 
 let dbPromise;
-const DATA_STORES = ["weight_entries", "food_entries", "food_presets", "workouts", "exercise_presets"];
+// The legacy stores remain physically present so existing installations can
+// migrate their weight history safely. New app code only actively uses the
+// nutrition stores below.
+const LEGACY_DATA_STORES = ["weight_entries", "food_entries", "food_presets", "workouts", "exercise_presets"];
+export const WEIGHT_SUPABASE_MIGRATION_KEY = "weight_supabase_migration_v1";
+export const PENDING_LEGACY_WEIGHT_IMPORT_KEY = "pending_legacy_weight_import_v1";
 const LEGACY_LOCAL_STORAGE_KEYS = [
   "fittrack_data",
   "fittrack-backup",
@@ -223,7 +227,7 @@ export async function createDataSnapshot(reason, payload) {
     id: `backup_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     reason,
     created_at: toLocalIso(),
-    schema_version: 2,
+    schema_version: 3,
     payload,
   };
   await putItem("backups", snapshot);
@@ -253,9 +257,10 @@ export async function migrateLegacyLocalStorageData() {
   await createDataSnapshot("before-legacy-local-storage-migration", legacy);
   await saveSettings(normalized.settings || {});
 
-  for (const storeName of DATA_STORES) {
+  for (const storeName of ["food_entries", "food_presets"]) {
     await replaceStore(storeName, normalized[storeName] || []);
   }
+  await stageLegacyWeightImport(normalized.weight_entries);
 
   await setMeta(migrationKey, {
     completed: true,
@@ -289,6 +294,9 @@ export function mergeSettings(settings) {
     ? merged.preferences.theme
     : "system";
   delete merged.goals.training_days_goal_per_week;
+  delete merged.goals.strength_goal_per_week;
+  delete merged.goals.cardio_goal_per_week;
+  delete merged.notifications.focus.training;
   return merged;
 }
 
@@ -313,11 +321,50 @@ function isPlainObject(value) {
 }
 
 async function hasExistingUserData() {
-  for (const storeName of DATA_STORES) {
+  for (const storeName of LEGACY_DATA_STORES) {
     const rows = await getAll(storeName);
     if (rows.length > 0) return true;
   }
   return false;
+}
+
+// These functions are intentionally the only remaining IndexedDB access path
+// for weight rows. They exist exclusively for the one-time Supabase migration.
+export async function getLegacyWeightEntries() {
+  return getAll("weight_entries");
+}
+
+export async function stageLegacyWeightImport(entries) {
+  const rows = asRows(entries);
+  if (!rows.length) return null;
+  const existing = await getStagedLegacyWeightEntries();
+  const byId = new Map();
+  for (const row of [...existing, ...rows]) {
+    const key = row.id || `${row.date}:${row.weight_kg}:${row.updated_at || row.created_at || ""}`;
+    byId.set(key, row);
+  }
+  await setMeta(PENDING_LEGACY_WEIGHT_IMPORT_KEY, {
+    entries: [...byId.values()],
+    staged_at: toLocalIso(),
+  });
+  return byId.size;
+}
+
+export async function getStagedLegacyWeightEntries() {
+  const pending = await getMeta(PENDING_LEGACY_WEIGHT_IMPORT_KEY);
+  return asRows(pending?.value?.entries);
+}
+
+export async function clearStagedLegacyWeightEntries() {
+  await setMeta(PENDING_LEGACY_WEIGHT_IMPORT_KEY, {
+    entries: [],
+    cleared_at: toLocalIso(),
+  });
+}
+
+export async function deleteLegacyWeightEntries() {
+  await clearStore("weight_entries");
+  await clearStagedLegacyWeightEntries();
 }
 
 function findLegacyLocalStoragePayload() {

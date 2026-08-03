@@ -1,4 +1,4 @@
-const APP_VERSION = "2026-07-29-share-import-entries";
+const APP_VERSION = "2026-08-03-nutrition-cloud-weight-v3";
 const APP_CACHE = `fittrack-app-shell-${APP_VERSION}`;
 const APP_CACHE_PREFIX = "fittrack-app-shell-";
 
@@ -10,6 +10,9 @@ const CORE_ASSETS = [
   "./db.js",
   "./calculations.js",
   "./export-import.js",
+  "./supabase-client.js",
+  "./auth-service.js",
+  "./weight-repository.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",

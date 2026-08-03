@@ -156,55 +156,6 @@ export function calculateWeightChartSeries(weightEntries) {
   return { points, firstDate, lastDate };
 }
 
-export function calculateWeeklyTrainingStats(workouts, referenceDateKey = formatDateKey(new Date())) {
-  const referenceWeek = getIsoWeekKey(referenceDateKey);
-  const byWeekMap = new Map();
-
-  for (const workout of workouts || []) {
-    if (!workout.date) continue;
-    const week = getIsoWeekKey(workout.date);
-    if (!byWeekMap.has(week.key)) {
-      byWeekMap.set(week.key, {
-        key: week.key,
-        label: `KW ${week.week}`,
-        year: week.year,
-        week: week.week,
-        total: 0,
-        strength: 0,
-        cardio: 0,
-        other: 0,
-      });
-    }
-
-    const bucket = byWeekMap.get(week.key);
-    bucket.total += 1;
-    if (workout.type === "strength") {
-      bucket.strength += 1;
-    } else if (workout.type === "cardio") {
-      bucket.cardio += 1;
-    } else {
-      bucket.other += 1;
-    }
-  }
-
-  const byWeek = [...byWeekMap.values()].sort((a, b) => a.key.localeCompare(b.key));
-  const emptyWeek = {
-    key: referenceWeek.key,
-    label: `KW ${referenceWeek.week}`,
-    year: referenceWeek.year,
-    week: referenceWeek.week,
-    total: 0,
-    strength: 0,
-    cardio: 0,
-    other: 0,
-  };
-
-  return {
-    thisWeek: byWeekMap.get(referenceWeek.key) || emptyWeek,
-    byWeek,
-  };
-}
-
 export function calculateMaintenanceDelta(calories, minMaintenance, maxMaintenance) {
   const kcal = toNumber(calories);
   const min = toNumber(minMaintenance);
