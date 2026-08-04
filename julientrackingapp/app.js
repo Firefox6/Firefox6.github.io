@@ -113,6 +113,7 @@ let toastTimer = null;
 let renderToken = 0;
 let scannedProduct = null;
 let importedEntry = null;
+let selectedImportFile = null;
 let scanMode = "barcode";
 let barcodeStream = null;
 let barcodeAnimationFrame = null;
@@ -700,7 +701,7 @@ function renderMoreV2() {
       </div>
       <form id="import-form" style="margin-top: 16px;">
         <div class="form-grid">
-          ${field("Import-Datei", `<input type="file" name="import_file" accept="application/json" required>`)}
+          ${field("Import-Datei", `<input id="import-file" type="file" name="import_file" accept="application/json">`)}
           ${field("Modus", `
             <select name="import_mode">
               <option value="merge">Zusammenführen</option>
@@ -709,6 +710,7 @@ function renderMoreV2() {
             </select>
           `)}
         </div>
+        <p id="import-file-status" class="section-note" aria-live="polite">${selectedImportFile ? `Ausgewählt: ${safe(selectedImportFile.name)}` : "Noch keine Datei ausgewählt."}</p>
         <button class="btn" type="submit">Import starten</button>
       </form>
     </section>
@@ -1074,6 +1076,16 @@ async function handleChange(event) {
       await render();
     }
 
+    if (target.id === "import-file") {
+      selectedImportFile = target.files?.[0] || null;
+      const status = document.querySelector("#import-file-status");
+      if (status) {
+        status.textContent = selectedImportFile
+          ? `Ausgewählt: ${selectedImportFile.name}`
+          : "Noch keine Datei ausgewählt.";
+      }
+    }
+
     if (target.id === "quick-save-preset") {
       document.querySelector("#quick-preset-fields")?.toggleAttribute("hidden", !target.checked);
     }
@@ -1385,7 +1397,7 @@ async function saveNotificationSettings(form) {
 }
 
 async function importData(form) {
-  const file = form.elements.namedItem("import_file")?.files?.[0];
+  const file = selectedImportFile || form.elements.namedItem("import_file")?.files?.[0];
   const mode = formValue(form, "import_mode");
   if (!file) throw new Error("Bitte Import-Datei wählen.");
 
@@ -1410,6 +1422,7 @@ async function importData(form) {
   if (result?.ignoredWorkoutsCount) ignored.push(`${fmt(result.ignoredWorkoutsCount, 0)} alte Workout-Einträge`);
   if (result?.ignoredBodyMeasurementsCount) ignored.push(`${fmt(result.ignoredBodyMeasurementsCount, 0)} Körpermessungen`);
   if (ignored.length) showToast(`${ignored.join(" und ")} wurden nicht importiert.`);
+  selectedImportFile = null;
   await refreshWeightData();
   await render();
 }
