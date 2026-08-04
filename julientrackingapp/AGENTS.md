@@ -15,14 +15,12 @@ FitTrack Nutrition ist eine persönliche, deutschsprachige PWA zur Erfassung von
 - Die Oberfläche ist Deutsch (de-CH), metrisch, responsiv und als installierbare PWA ausgelegt.
 - Das Frontend besteht aus statischem HTML, CSS und ES-Modulen ohne Bundler oder Build-Schritt.
 - package.json enthält nur den Skript-Eintrag npm test mit Node Test Runner. Aktuell gibt es keine Testdateien.
-- FitTrack Live stellt zusätzlich einen privaten MCP-Endpunkt bereit. ChatGPT ruft damit Daten bei einer passenden Tool-Nutzung frisch aus Supabase ab; es gibt ausdrücklich keine Hintergrundsynchronisierung oder dauerhafte Datenkopie in ChatGPT.
 
 Die App-Shell ist lokal und cachebar, benötigt für die produktive Nutzung aber Internetzugriff auf Supabase. Barcode-Suche, Kamera-Fallback und QR-Erzeugung verwenden zusätzlich externe Dienste beziehungsweise CDN-Skripte.
 
 ## Projektstruktur und Verantwortlichkeiten
 
 - index.html: Statische Shell mit Topbar, Bottom-Navigation, Kamera-/QR-Overlays, Update-Banner, Toast und Moduleinstieg.
-- oauth-consent.html und oauth-consent.js: Statische Supabase-OAuth-Zustimmungsseite für die persönliche ChatGPT-Verbindung. Die Route benötigt `authorization_id`, verlangt bei Bedarf die bestehende FitTrack-Anmeldung und leitet nach Approve/Deny zu Supabase zurück.
 - app.js: Zentrale UI-Logik. Hält transienten Zustand, rendert alle vier Screens, verarbeitet Eventdelegation, steuert Cloud-Synchronisierung, Migrationen, Barcode/QR, Benachrichtigungen und Canvas-Chart.
 - styles.css: Komplettes responsives Styling, Design-Tokens für hell/dunkel, App-Shell, Formulare, Cards, Overlays und Breakpoints.
 - calculations.js: DOM-freie Berechnungen für Ernährung, Gewicht, Kalorienpool, BMI und Auto-TDEE.
@@ -35,9 +33,6 @@ Die App-Shell ist lokal und cachebar, benötigt für die produktive Nutzung aber
 - share-payload.js: Kompaktes QR-Format ft2 für einzelne Food-Einträge; kann auch das ältere Objektformat lesen.
 - manifest.webmanifest: PWA-Metadaten, fünf Icons und Shortcuts für Barcode, Gewicht und Schnelleintrag.
 - service-worker.js: Versionierter App-Shell-Cache, Offline-Fallback und Update-Aktivierung.
-- supabase/config.toml und supabase/functions/fittrack-mcp/: Deno-Edge-Function für den privaten, Streamable-HTTP-MCP-Endpunkt. Die gepinnten Server-Imports stehen in `deno.json`.
-- plugins/fittrack-live-data/: Privates Codex-Plugin mit MCP-Konfiguration, Arbeitsanweisung und ChatGPT-Einrichtungsanleitung.
-- .agents/plugins/marketplace.json: Lokaler Repo-Marktplatz für `fittrack-live-data`.
 - icons/: Die echten PWA-Icons. Im Manifest und Service Worker immer die Pfade icons/... verwenden.
 
 Die fünf verwendeten Icon-Dateien sind:
@@ -57,8 +52,6 @@ Es gibt keine installierten npm-Abhängigkeiten und keinen Build. Zur Laufzeit w
 - qrcodejs2-fixes@0.0.2 zur QR-Erzeugung
 - Open Food Facts Schweiz API für Produktdaten nach einem Barcode-Scan
 - chatgpt.com als Ziel für den optional kopierten Tageskontext
-
-Die Edge Function verwendet zusätzlich ausschliesslich serverseitig gepinnte Deno-Imports von `@modelcontextprotocol/sdk`, `@supabase/supabase-js` und `zod`. Das verändert weder PWA-Build noch PWA-Abhängigkeiten.
 
 Der Service Worker cached nur Same-Origin-Assets. Die oben genannten CDN- und API-Aufrufe sind nicht offline verfügbar. Externe Bibliotheken oder APIs nicht stillschweigend ersetzen oder in den Cache aufnehmen.
 
@@ -115,25 +108,6 @@ Wichtige Regeln:
 - weight_measurements wird von mehreren Anwendungen geteilt. Nutrition darf nur Zeilen mit source = manual_nutrition bearbeiten oder löschen.
 - Für die Anzeige wird pro lokalem Kalendertag eine Gewichtsmessung ausgewählt. Priorität: manual_nutrition, manual_fitness, health_connect, danach andere Quellen; bei gleicher Quelle gewinnt die neuere Messzeit.
 - Die Quelle und externe IDs von Health-/Fitness-Daten nicht überschreiben oder für einen anderen Benutzer wiederverwenden.
-- Die Edge Function darf keinen Service-Role- oder Secret-Key enthalten. Sie validiert jede MCP-Anfrage mit `auth.getUser(token)` und verwendet danach ausschliesslich einen Supabase-Client mit genau diesem Bearer-Token. RLS und der zusätzliche `user_id`-Filter sind beide verpflichtend.
-- Nur die Protected-Resource-Metadaten und der Health-Check sind ohne Token erreichbar. Für die MCP-Initialisierung dürfen auch die Tool-Metadaten gelesen werden; jedes Daten-Tool muss OAuth über `securitySchemes` und wegen SDK-Kompatibilität zusätzlich über `_meta.securitySchemes` deklarieren und fordert ohne gültiges Token über `_meta["mcp/www_authenticate"]` eine OAuth-Verknüpfung mit `resource_metadata` an.
-- Die MCP-Tools sind absichtlich eng begrenzt: keine generische SQL-/REST-Abfrage, kein Schreiben des Review-Status und keine Änderung fremder Gewichtsquellen. Schreibtools müssen als mutierend annotiert bleiben und die Plugin-Anweisung verlangt Vorschau plus ein eindeutiges Chat-„Ja“ vor genau einer Änderung.
-
-## FitTrack Live: OAuth, Deployment und Plugin
-
-Der produktive MCP-Endpunkt lautet `https://fvaaccshuxkvvythbuon.supabase.co/functions/v1/fittrack-mcp/mcp`. Die zugehörige Protected-Resource-Metadatenroute lautet `https://fvaaccshuxkvvythbuon.supabase.co/functions/v1/fittrack-mcp/.well-known/oauth-protected-resource` und verweist auf den Supabase OAuth Server unter `https://fvaaccshuxkvvythbuon.supabase.co/auth/v1`.
-
-Vor einem produktiven Connect in ChatGPT müssen im Supabase Dashboard unter Authentication → OAuth Server der OAuth 2.1 Server und Dynamic Client Registration aktiviert, die bestehende Produktions-URL der PWA als Site URL hinterlegt und der Authorization Path auf `/oauth-consent.html` gesetzt sein. Die Zustimmungsseite ist Teil der PWA und daher bei jeder UI-/Asset-Änderung mit dem Service Worker auszuliefern.
-
-Deployment und Betrieb:
-
-1. `supabase/functions/fittrack-mcp/` samt `deno.json` als Edge Function `fittrack-mcp` deployen; die Plattform-JWT-Prüfung ist bewusst deaktiviert, weil die Function Metadaten anonym ausliefert und die Token-Prüfung selbst durchführt.
-2. Den externen MCP-URL zunächst mit MCP Inspector gegen OAuth Discovery, 401-Challenge, Login, Token-Refresh sowie ungültige/abgelaufene Tokens prüfen.
-3. In ChatGPT Developer Mode die MCP-Verbindung anlegen. Erst die von ChatGPT vergebene ID `plugin_asdk_app_…` in eine echte `.app.json` schreiben und erst dann `apps` in `.codex-plugin/plugin.json` ergänzen. Niemals eine Platzhalter-ID einchecken.
-4. Den Repo-Marktplatz konfigurieren, `fittrack-live-data` lokal installieren und für die Prüfung eine neue Unterhaltung beginnen.
-
-Vor jedem Rollout die Supabase Security Advisors prüfen. `public.rls_auto_enable()` darf für `public`, `anon` und `authenticated` kein EXECUTE-Recht haben; `public.set_updated_at()` braucht `search_path = pg_catalog`; Leaked Password Protection ist im Dashboard zu aktivieren. RLS-Ownership-Policies auf `auth.uid() = user_id` bleiben die Zugriffgrenze.
-
 ## Lokale Daten, Snapshots und Migration
 
 db.js verwendet weiterhin die Datenbank julien_tracking_db mit DB_VERSION = 3. Die Stores meta, backups, settings, weight_entries, food_entries, food_presets, workouts und exercise_presets bleiben aus Kompatibilitätsgründen erhalten.
@@ -268,7 +242,7 @@ Gewichte aus älteren Backups erhalten beim Import stabile externe IDs. Dadurch 
 
 ## PWA und Service Worker
 
-service-worker.js definiert APP_VERSION = 2026-08-04-fittrack-live-oauth-v2. Der Cache enthält alle lokalen Module, die Shell, Manifest, OAuth-Zustimmungsseite samt Modul und fünf Icons.
+service-worker.js definiert APP_VERSION = 2026-08-04-dashboard-bmi-v10. Der Cache enthält alle lokalen Module, die Shell, Manifest und fünf Icons.
 
 - Navigation: network-first mit Cache-/index.html-Fallback.
 - Andere Same-Origin-GET-Requests: cache-first.
@@ -288,7 +262,7 @@ Nach jeder Änderung am App-Code – auch bei einer noch so kleinen Änderung �
 - Bei QR-Formatänderungen Abwärtskompatibilität mit dem älteren Objektformat erhalten.
 - Bei Barcode- oder QR-Änderungen Kamera-Ressourcen beim Schliessen wieder freigeben.
 - Für neue Einstellungen mergeSettings(), cleanSettingsForExport(), Cloud-Speicherung, Import und UI-Formular konsistent erweitern.
-- Bei PWA-Asset-Änderungen index.html, oauth-consent.html, manifest.webmanifest, service-worker.js und icons/ gemeinsam prüfen.
+- Bei PWA-Asset-Änderungen index.html, manifest.webmanifest, service-worker.js und icons/ gemeinsam prüfen.
 
 ## Risikobasierte Verifikation
 
