@@ -1,0 +1,9 @@
+{
+  "name": "FitTrack Fitness",
+  "short_name": "FitTrack",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#101716",
+  "theme_color": "#101716",
+  "description": "Verständliche Recovery-, Schlaf- und Trainingsdaten."
+}
