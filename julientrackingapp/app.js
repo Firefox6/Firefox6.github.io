@@ -23,8 +23,12 @@ import {
   calculateMovingAverage,
   calculateWeightChartSeries,
   calculateWeeklyAverageWeight,
-  calculateWeeklyCaloriePool,
+  calculateCaloriePoolLedger,
+  caloriePoolBalanceText,
+  caloriePoolProgressText,
   formatDateKey,
+  formatPoolExpiry,
+  getCalorieGoalForDate,
   getBMICategory,
   getIsoWeekKey,
   parseDateKey,
@@ -376,12 +380,10 @@ function renderDashboardV2() {
   const nutrition = calculateDailyNutrition(data.food_entries, today);
   const weightStats = buildWeightStats();
   const avgCalories7 = average(lastNDays(today, 7).map((date) => calculateDailyNutrition(data.food_entries, date).calories_kcal));
-  const caloriePool = calculateWeeklyCaloriePool(data.food_entries, goals.calorie_goal_kcal, today).pool;
-  const effectiveCalorieGoal = (toNumber(goals.calorie_goal_kcal) || 0) + caloriePool;
-  const calorieProgress = percent(nutrition.calories_kcal, effectiveCalorieGoal);
+  const poolLedger = calculateCurrentPoolLedger(today);
+  const calorieProgress = percent(nutrition.calories_kcal, poolLedger.total_allowance_kcal);
   const proteinProgress = percent(nutrition.protein_g, goals.protein_goal_g);
   const proteinOpen = Math.max((toNumber(goals.protein_goal_g) || 0) - (toNumber(nutrition.protein_g) || 0), 0);
-  const calorieOpen = effectiveCalorieGoal - (toNumber(nutrition.calories_kcal) || 0);
   const ringProgress = Math.min(Math.max(calorieProgress, 0), 100);
   const proteinRingProgress = Math.min(Math.max(proteinProgress, 0), 100);
   const autoTdee = calculateAutoTdee(data.weight_entries, data.food_entries, today);
@@ -414,7 +416,8 @@ function renderDashboardV2() {
         <div class="today-quick-grid">
           <div class="quick-stat">
             <span>Kalorien</span>
-            <strong>${fmt(nutrition.calories_kcal, 0)} / ${fmt(effectiveCalorieGoal, 0)}</strong>
+            <strong>${fmt(nutrition.calories_kcal, 0)} / ${fmt(poolLedger.base_goal_kcal, 0)}</strong>
+            ${poolLedger.available_at_day_start_kcal > 0 ? `<small>+${fmt(poolLedger.available_at_day_start_kcal, 0)} kcal Pool</small>` : ""}
           </div>
           <div class="quick-stat">
             <span>Protein offen</span>
@@ -423,27 +426,33 @@ function renderDashboardV2() {
         </div>
 
         <div class="today-actions" style="position: relative; z-index: 1; margin-top: 18px;">
-          <span class="pill ${caloriePillClass(nutrition.calories_kcal, effectiveCalorieGoal)}">${calorieBalanceText(nutrition.calories_kcal, effectiveCalorieGoal)}</span>
+          <span class="pill ${caloriePillClass(nutrition.calories_kcal, poolLedger.total_allowance_kcal)}">${caloriePoolBalanceText(poolLedger)}</span>
           <button class="btn small primary" type="button" data-action="copy-chatgpt-daily-context">Heute exportieren</button>
         </div>
       </article>
     </section>
 
     <section class="dashboard-flow">
-      <article class="card">
-        <div class="section-head">
-          <div>
-            <h2>Tagesziele</h2>
-            <p class="section-note">${calorieOpen >= 0 ? `${fmt(calorieOpen, 0)} kcal übrig` : `${fmt(Math.abs(calorieOpen), 0)} kcal drüber`}.</p>
+      <div class="dashboard-goals-column">
+        <article class="card">
+          <div class="section-head">
+            <div>
+              <h2>Tagesziele</h2>
+              <p class="section-note">${caloriePoolBalanceText(poolLedger)}.</p>
+            </div>
+            <span class="pill ${poolLedger.available_kcal > 0 ? "ok" : ""}">${poolLedger.available_kcal > 0 ? "+" : ""}${fmt(poolLedger.available_kcal, 0)} kcal Pool</span>
           </div>
-          <span class="pill ${caloriePool > 0 ? "ok" : ""}">${caloriePool > 0 ? "+" : ""}${fmt(caloriePool, 0)} kcal Pool</span>
-        </div>
-        <div class="primary-progress-grid">
-          ${renderProgressRow("Kalorien", nutrition.calories_kcal, effectiveCalorieGoal, "kcal", { kind: "calories" })}
-          ${renderProgressRow("Protein", nutrition.protein_g, goals.protein_goal_g, "g", { kind: "protein" })}
-        </div>
-        <p class="section-note" style="margin-top: 10px;">${autoTdeeMessage(autoTdee)}</p>
-      </article>
+          <div class="primary-progress-grid">
+            ${renderProgressRow("Kalorien", nutrition.calories_kcal, poolLedger.total_allowance_kcal, "kcal", {
+              kind: "calories",
+              subText: caloriePoolProgressText(nutrition.calories_kcal, poolLedger),
+            })}
+            ${renderProgressRow("Protein", nutrition.protein_g, goals.protein_goal_g, "g", { kind: "protein" })}
+          </div>
+          <p class="section-note" style="margin-top: 10px;">${autoTdeeMessage(autoTdee)}</p>
+        </article>
+        ${renderCaloriePoolCard(poolLedger)}
+      </div>
 
       <article class="card">
         <div class="section-head">
@@ -464,7 +473,6 @@ function renderDashboardV2() {
 
     <section class="grid auto">
       ${renderMetricCard("7 Tage Kcal", fmt(avgCalories7, 0), "Schnitt")}
-      ${renderMetricCard("Wochen-Pool", `${caloriePool >= 0 ? "+" : ""}${fmt(caloriePool, 0)} kcal`, "bis heute")}
       ${renderMetricCard("Aktuell", weightStats.latest ? `${fmt(weightStats.latest.weight_kg, 1)} kg` : "-", weightStats.latest ? formatDate(weightStats.latest.date) : "Noch kein Eintrag")}
       ${renderMetricCard("Seit Start", weightStats.diffStart !== null ? `${fmtSigned(weightStats.diffStart, 1)} kg` : "-", "Gewicht")}
     </section>
@@ -514,8 +522,11 @@ function renderCaloriesV2() {
   const proteinPerKg = weightStats.trendWeight ? nutrition.protein_g / weightStats.trendWeight : null;
   const maintenance = calculateMaintenanceDelta(nutrition.calories_kcal, data.settings.maintenance.min_kcal, data.settings.maintenance.max_kcal);
   const isToday = state.selectedDate === todayKey();
-  const caloriePool = isToday ? calculateWeeklyCaloriePool(data.food_entries, goals.calorie_goal_kcal, todayKey()).pool : 0;
-  const effectiveCalorieGoal = (toNumber(goals.calorie_goal_kcal) || 0) + caloriePool;
+  const poolLedger = isToday ? calculateCurrentPoolLedger(todayKey()) : null;
+  const baseCalorieGoal = isToday
+    ? poolLedger.base_goal_kcal
+    : getCalorieGoalForDate(goals.calorie_goal_kcal, data.settings.pool?.calorie_goal_history, state.selectedDate);
+  const effectiveCalorieGoal = isToday ? poolLedger.total_allowance_kcal : baseCalorieGoal;
 
   return `
     <section class="card">
@@ -544,13 +555,22 @@ function renderCaloriesV2() {
         </div>
       </div>
       <div class="grid two">
-        ${renderMetric("Kcal", goalValueText(nutrition.calories_kcal, effectiveCalorieGoal, "kcal", 0), calorieBalanceText(nutrition.calories_kcal, effectiveCalorieGoal))}
+        ${renderMetric("Kcal", caloriePoolProgressText(nutrition.calories_kcal, poolLedger || {
+          base_goal_kcal: baseCalorieGoal,
+          available_at_day_start_kcal: 0,
+        }), isToday ? caloriePoolBalanceText(poolLedger) : calorieBalanceText(nutrition.calories_kcal, baseCalorieGoal))}
         ${renderMetric("Protein", goalValueText(nutrition.protein_g, goals.protein_goal_g, "g", 0), proteinPerKg ? `${fmt(proteinPerKg, 2)} g/kg` : "Gewicht nicht verfügbar.")}
         ${renderMetric("KH", goalValueText(nutrition.carbs_g, goals.carbs_goal_g, "g", 0), optionalGoalSub(nutrition.carbs_g, goals.carbs_goal_g))}
         ${renderMetric("Fett", goalValueText(nutrition.fat_g, goals.fat_goal_g, "g", 0), optionalGoalSub(nutrition.fat_g, goals.fat_goal_g))}
       </div>
       <div class="screen-stack" style="margin-top: 14px;">
-        ${renderProgressRow("Kalorien", nutrition.calories_kcal, effectiveCalorieGoal, "kcal", { kind: "calories" })}
+        ${renderProgressRow("Kalorien", nutrition.calories_kcal, effectiveCalorieGoal, "kcal", {
+          kind: "calories",
+          subText: caloriePoolProgressText(nutrition.calories_kcal, poolLedger || {
+            base_goal_kcal: baseCalorieGoal,
+            available_at_day_start_kcal: 0,
+          }),
+        })}
         ${renderProgressRow("Protein", nutrition.protein_g, goals.protein_goal_g, "g", { kind: "protein" })}
         ${nutrition.hasOptional ? renderOptionalNutrition(nutrition) : ""}
       </div>
@@ -1441,8 +1461,26 @@ async function saveProfileSettings(form) {
 
 async function saveGoalSettings(form) {
   const settings = structuredClone(data.settings);
+  const previousCalorieGoal = toNumber(settings.goals.calorie_goal_kcal) || 0;
   for (const key of Object.keys(settings.goals)) {
     settings.goals[key] = optionalNonNegativeNumber(form, key, "Ziele dürfen nicht negativ sein.");
+  }
+  const nextCalorieGoal = toNumber(settings.goals.calorie_goal_kcal) || 0;
+  if (nextCalorieGoal !== previousCalorieGoal) {
+    const history = Array.isArray(settings.pool?.calorie_goal_history)
+      ? settings.pool.calorie_goal_history
+      : [];
+    if (!history.length) {
+      history.push({ effective_date: "1970-01-01", calorie_goal_kcal: previousCalorieGoal });
+    }
+    const effectiveDate = todayKey();
+    const currentDayEntry = history.find((entry) => entry.effective_date === effectiveDate);
+    if (currentDayEntry) {
+      currentDayEntry.calorie_goal_kcal = nextCalorieGoal;
+    } else {
+      history.push({ effective_date: effectiveDate, calorie_goal_kcal: nextCalorieGoal });
+    }
+    settings.pool = { ...settings.pool, calorie_goal_history: history };
   }
   delete settings.goals.training_days_goal_per_week;
   delete settings.goals.strength_goal_per_week;
@@ -1671,15 +1709,14 @@ async function sendReviewNotification(type) {
 
 function buildDailyReviewText() {
   const focus = data.settings.notifications.focus;
-  const goals = data.settings.goals;
   const today = todayKey();
   const nutrition = calculateDailyNutrition(data.food_entries, today);
-  const pool = calculateWeeklyCaloriePool(data.food_entries, goals.calorie_goal_kcal, today).pool;
+  const poolLedger = calculateCurrentPoolLedger(today);
   const weightStats = buildWeightStats();
   const autoTdee = calculateAutoTdee(data.weight_entries, data.food_entries, today);
   const parts = [];
 
-  if (focus.calories) parts.push(`${fmt(nutrition.calories_kcal, 0)} / ${fmt(goals.calorie_goal_kcal, 0)} kcal (Pool ${pool >= 0 ? "+" : ""}${fmt(pool, 0)})`);
+  if (focus.calories) parts.push(`${caloriePoolProgressText(nutrition.calories_kcal, poolLedger)} · ${caloriePoolBalanceText(poolLedger)}`);
   if (focus.protein) parts.push(`${fmt(nutrition.protein_g, 0)}g Protein`);
   if (focus.carbs) parts.push(`${fmt(nutrition.carbs_g, 0)}g KH`);
   if (focus.fat) parts.push(`${fmt(nutrition.fat_g, 0)}g Fett`);
@@ -1694,14 +1731,16 @@ function buildDailyReviewText() {
 
 function buildWeeklyReviewText() {
   const focus = data.settings.notifications.focus;
-  const goals = data.settings.goals;
   const today = todayKey();
   const weightStats = buildWeightStats();
-  const pool = calculateWeeklyCaloriePool(data.food_entries, goals.calorie_goal_kcal, today).pool;
+  const poolLedger = calculateCurrentPoolLedger(today);
   const autoTdee = calculateAutoTdee(data.weight_entries, data.food_entries, today);
   const parts = [];
 
-  if (focus.calories) parts.push(`Rest-Pool ${pool >= 0 ? "+" : ""}${fmt(pool, 0)} kcal`);
+  if (focus.calories) {
+    const oldest = poolLedger.buckets[0];
+    parts.push(`Pool ${fmt(poolLedger.available_kcal, 0)} kcal${oldest ? ` · ${formatPoolExpiry(oldest)}` : ""}`);
+  }
   if (focus.weight && weightStats.avg7) parts.push(`Ø ${fmt(weightStats.avg7, 1)} kg`);
   if (focus.auto_tdee && autoTdee.available) parts.push(`Auto-TDEE ${fmt(autoTdee.tdee, 0)} kcal`);
 
@@ -2811,12 +2850,15 @@ function renderProgressRow(label, current, goal, unit, options = {}) {
   const goalValue = toNumber(goal) || 0;
   const progress = percent(currentValue, goalValue);
   const progressClass = progress > 100 && options.kind !== "protein" ? "warn" : "ok";
+  const subText = options.subText || (goalValue
+    ? `${fmt(currentValue, 0)} ${safe(unit)} / ${fmt(goalValue, 0)} ${safe(unit)}`
+    : `${fmt(currentValue, 0)} ${safe(unit)} · kein Ziel gesetzt`);
   return `
     <div>
       <div class="kpi-row">
         <div class="kpi-main">
           <p class="kpi-title">${safe(label)}</p>
-          <p class="kpi-sub">${goalValue ? `${fmt(currentValue, 0)} ${safe(unit)} / ${fmt(goalValue, 0)} ${safe(unit)}` : `${fmt(currentValue, 0)} ${safe(unit)} · kein Ziel gesetzt`}</p>
+          <p class="kpi-sub">${safe(subText)}</p>
         </div>
         <div class="kpi-value">${goalValue ? `${fmt(progress, 0)}%` : "–"}</div>
       </div>
@@ -2910,6 +2952,55 @@ function calorieBalanceText(calories, goal) {
   const delta = (toNumber(goal) || 0) - (toNumber(calories) || 0);
   if (delta >= 0) return `Noch ${fmt(delta, 0)} kcal offen`;
   return `${fmt(Math.abs(delta), 0)} kcal über Ziel`;
+}
+
+function calculateCurrentPoolLedger(referenceDate = todayKey()) {
+  return calculateCaloriePoolLedger(
+    data.food_entries,
+    data.settings.goals.calorie_goal_kcal,
+    data.settings.pool?.calorie_goal_history,
+    referenceDate,
+  );
+}
+
+function renderCaloriePoolCard(ledger) {
+  const buckets = ledger.buckets || [];
+  const oldest = buckets[0];
+  const allocationText = (ledger.today_allocations || [])
+    .map((allocation) => `${fmt(allocation.kcal, 0)} kcal von ${formatDate(allocation.source_date)}`)
+    .join(" · ");
+
+  return `
+    <article class="card pool-card" aria-label="Kalorien-Pool">
+      <div class="section-head">
+        <div>
+          <h2>Kalorien-Pool</h2>
+          <p class="section-note">Beim Überschreiten des Tagesziels wird der älteste Anteil zuerst verwendet.</p>
+        </div>
+        <span class="pool-total">${fmt(ledger.available_kcal, 0)} kcal</span>
+      </div>
+      ${oldest ? `
+        <div class="pool-expiry">
+          <span>Ältester Anteil</span>
+          <strong>${formatPoolExpiry(oldest)}</strong>
+        </div>
+      ` : ""}
+      ${allocationText ? `<p class="pool-used-today">Heute genutzt: ${safe(allocationText)}</p>` : ""}
+      ${buckets.length ? `
+        <div class="pool-source-list">
+          ${buckets.map((bucket) => `
+            <div class="pool-source-row">
+              <div>
+                <p class="pool-source-date">${safe(formatDate(bucket.source_date))}</p>
+                <p class="pool-source-meta">${fmt(bucket.initial_kcal, 0)} kcal angespart${bucket.used_kcal > 0 ? ` · ${fmt(bucket.used_kcal, 0)} kcal genutzt` : ""} · ${safe(formatPoolExpiry(bucket))}</p>
+              </div>
+              <strong>${fmt(bucket.remaining_kcal, 0)} kcal</strong>
+            </div>
+          `).join("")}
+        </div>
+      ` : `<p class="section-note pool-empty">Noch kein verfügbares Guthaben. Unter dem Tagesziel angesparte Kalorien erscheinen am nächsten Tag hier.</p>`}
+    </article>
+  `;
 }
 
 function maintenanceText(maintenance) {

@@ -28,6 +28,9 @@ export const DEFAULT_SETTINGS = {
     salt_max_g: null,
     weight_goal_kg: 80,
   },
+  pool: {
+    calorie_goal_history: [],
+  },
   maintenance: {
     min_kcal: 2400,
     max_kcal: 2800,
@@ -290,6 +293,7 @@ export async function saveSettings(settings) {
 
 export function mergeSettings(settings) {
   const merged = deepMerge(DEFAULT_SETTINGS, settings || {});
+  if (!isPlainObject(merged.pool)) merged.pool = { calorie_goal_history: [] };
   merged.profile.sex = merged.profile.sex === "female" ? "female" : "male";
   merged.preferences.theme = ["system", "light", "dark"].includes(merged.preferences.theme)
     ? merged.preferences.theme
@@ -298,7 +302,22 @@ export function mergeSettings(settings) {
   delete merged.goals.strength_goal_per_week;
   delete merged.goals.cardio_goal_per_week;
   delete merged.notifications.focus.training;
+  merged.pool.calorie_goal_history = normalizeCalorieGoalHistory(merged.pool.calorie_goal_history);
   return merged;
+}
+
+function normalizeCalorieGoalHistory(history) {
+  const byDate = new Map();
+  for (const entry of Array.isArray(history) ? history : []) {
+    if (!entry || typeof entry.effective_date !== "string") continue;
+    const goal = Number(entry.calorie_goal_kcal);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(entry.effective_date) || !Number.isFinite(goal) || goal < 0) continue;
+    byDate.set(entry.effective_date, {
+      effective_date: entry.effective_date,
+      calorie_goal_kcal: goal,
+    });
+  }
+  return [...byDate.values()].sort((a, b) => a.effective_date.localeCompare(b.effective_date));
 }
 
 function deepMerge(base, override) {

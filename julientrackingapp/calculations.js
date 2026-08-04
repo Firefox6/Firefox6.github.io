@@ -171,27 +171,197 @@ export function calculateMaintenanceDelta(calories, minMaintenance, maxMaintenan
   };
 }
 
-export function calculateWeeklyCaloriePool(foodEntries, calorieGoal, referenceDateKey) {
-  const goal = toNumber(calorieGoal);
+export const CALORIE_POOL_DAILY_CAP_KCAL = 250;
+export const CALORIE_POOL_VALID_DAYS = 7;
+
+export function getCalorieGoalForDate(calorieGoal, goalHistory, dateKey) {
+  const fallbackGoal = toNumber(calorieGoal) || 0;
+  if (!dateKey) return fallbackGoal;
+
+  const matchingHistory = (goalHistory || [])
+    .map((entry) => ({
+      effective_date: entry?.effective_date,
+      calorie_goal_kcal: toNumber(entry?.calorie_goal_kcal),
+    }))
+    .filter((entry) => parseDateKey(entry.effective_date) && entry.calorie_goal_kcal !== null && entry.calorie_goal_kcal >= 0)
+    .sort((a, b) => a.effective_date.localeCompare(b.effective_date));
+
+  let goal = fallbackGoal;
+  for (const entry of matchingHistory) {
+    if (entry.effective_date > dateKey) break;
+    goal = entry.calorie_goal_kcal;
+  }
+  return goal;
+}
+
+export function calculateCaloriePoolLedger(foodEntries, calorieGoal, goalHistory, referenceDateKey) {
   const referenceDate = parseDateKey(referenceDateKey);
-  if (!goal || goal <= 0 || !referenceDate) return { pool: 0, weekStartDate: null };
+  const emptyLedger = {
+    available_kcal: 0,
+    available_at_day_start_kcal: 0,
+    used_today_kcal: 0,
+    regular_open_kcal: 0,
+    total_open_kcal: 0,
+    over_target_after_pool_kcal: 0,
+    base_goal_kcal: 0,
+    total_allowance_kcal: 0,
+    buckets: [],
+    today_allocations: [],
+  };
+  if (!referenceDate) return emptyLedger;
 
-  const isoDay = referenceDate.getDay() === 0 ? 7 : referenceDate.getDay();
-  const monday = addDays(referenceDate, -(isoDay - 1));
-  const weekStartDate = formatDateKey(monday);
-  const lastCompletedDate = addDays(referenceDate, -1);
+  const referenceKey = formatDateKey(referenceDate);
+  const dailyCalories = buildDailyCalorieIndex(foodEntries, referenceKey);
+  const firstLoggedDateKey = [...dailyCalories.keys()].sort()[0] || referenceKey;
+  const startDate = parseDateKey(firstLoggedDateKey) || referenceDate;
+  const buckets = [];
+  let availableAtDayStart = 0;
+  let usedToday = 0;
+  let todayAllocations = [];
+  const referenceNutrition = dailyCalories.get(referenceKey) || { calories_kcal: 0, count: 0 };
+  const referenceGoal = getCalorieGoalForDate(calorieGoal, goalHistory, referenceKey);
 
-  let pool = 0;
-  let cursor = monday;
-  while (cursor <= lastCompletedDate) {
+  for (let cursor = startDate; cursor <= referenceDate; cursor = addDays(cursor, 1)) {
     const dateKey = formatDateKey(cursor);
-    const consumed = calculateDailyNutrition(foodEntries, dateKey).calories_kcal;
-    const delta = goal - consumed;
-    pool = delta >= 0 ? pool + Math.min(delta, 250) : Math.max(pool + delta, 0);
-    cursor = addDays(cursor, 1);
+    const nutrition = dailyCalories.get(dateKey) || { calories_kcal: 0, count: 0 };
+    const goal = dateKey === referenceKey ? referenceGoal : getCalorieGoalForDate(calorieGoal, goalHistory, dateKey);
+
+    // An Anteil darf bis einschliesslich seines siebten Folgetags verwendet werden.
+    // Er verschwindet erst zu Beginn des darauffolgenden Tages.
+    for (let index = buckets.length - 1; index >= 0; index -= 1) {
+      if (buckets[index].last_usable_date < dateKey || buckets[index].remaining_kcal <= 0) {
+        buckets.splice(index, 1);
+      }
+    }
+
+    if (dateKey === referenceKey) {
+      availableAtDayStart = sumPoolKcal(buckets);
+    }
+
+    const overage = nutrition.count > 0 && goal > 0
+      ? Math.max(nutrition.calories_kcal - goal, 0)
+      : 0;
+    const allocations = consumePoolBuckets(buckets, overage);
+
+    if (dateKey === referenceKey) {
+      todayAllocations = allocations;
+      usedToday = allocations.reduce((sum, allocation) => sum + allocation.kcal, 0);
+    }
+
+    // Der aktuelle Tag ist erst nach Tagesabschluss als neue Poolquelle verfügbar.
+    if (dateKey !== referenceKey && nutrition.count > 0 && goal > 0) {
+      const credit = Math.min(Math.max(goal - nutrition.calories_kcal, 0), CALORIE_POOL_DAILY_CAP_KCAL);
+      if (credit > 0) {
+        buckets.push({
+          source_date: dateKey,
+          initial_kcal: credit,
+          remaining_kcal: credit,
+          last_usable_date: formatDateKey(addDays(cursor, CALORIE_POOL_VALID_DAYS)),
+        });
+      }
+    }
   }
 
-  return { pool, weekStartDate };
+  const available = sumPoolKcal(buckets);
+  const currentCalories = referenceNutrition.calories_kcal;
+  const overage = referenceGoal > 0 ? Math.max(currentCalories - referenceGoal, 0) : 0;
+  const regularOpen = referenceGoal > 0 ? Math.max(referenceGoal - currentCalories, 0) : 0;
+  const activeBuckets = buckets.filter((bucket) => bucket.remaining_kcal > 0);
+
+  return {
+    available_kcal: available,
+    available_at_day_start_kcal: availableAtDayStart,
+    used_today_kcal: usedToday,
+    regular_open_kcal: regularOpen,
+    total_open_kcal: regularOpen + available,
+    over_target_after_pool_kcal: Math.max(overage - usedToday, 0),
+    base_goal_kcal: referenceGoal,
+    total_allowance_kcal: referenceGoal + availableAtDayStart,
+    buckets: activeBuckets.map((bucket) => ({
+      ...bucket,
+      used_kcal: bucket.initial_kcal - bucket.remaining_kcal,
+      days_until_expiry: daysBetween(referenceDate, parseDateKey(bucket.last_usable_date)),
+    })),
+    today_allocations: todayAllocations,
+  };
+}
+
+export function caloriePoolProgressText(calories, ledger) {
+  const current = toNumber(calories) || 0;
+  const baseGoal = toNumber(ledger?.base_goal_kcal) || 0;
+  const poolAtStart = toNumber(ledger?.available_at_day_start_kcal) || 0;
+  if (!baseGoal) return `${formatPoolNumber(current)} kcal · kein Ziel gesetzt`;
+  return `${formatPoolNumber(current)} kcal / ${formatPoolNumber(baseGoal)} kcal${poolAtStart > 0 ? ` + ${formatPoolNumber(poolAtStart)} kcal Pool` : ""}`;
+}
+
+export function caloriePoolBalanceText(ledger) {
+  const baseGoal = toNumber(ledger?.base_goal_kcal) || 0;
+  if (!baseGoal) return "Kein Kalorienziel gesetzt";
+
+  const regularOpen = toNumber(ledger.regular_open_kcal) || 0;
+  const poolOpen = toNumber(ledger.available_kcal) || 0;
+  const overTarget = toNumber(ledger.over_target_after_pool_kcal) || 0;
+  const usedToday = toNumber(ledger.used_today_kcal) || 0;
+
+  if (regularOpen > 0) {
+    return poolOpen > 0
+      ? `Noch ${formatPoolNumber(regularOpen)} kcal (+${formatPoolNumber(poolOpen)} kcal aus Pool) offen`
+      : `Noch ${formatPoolNumber(regularOpen)} kcal offen`;
+  }
+  if (poolOpen > 0) return `Noch ${formatPoolNumber(poolOpen)} kcal aus Pool offen`;
+  if (overTarget > 0) return `${formatPoolNumber(overTarget)} kcal über Ziel und Pool`;
+  if (usedToday > 0) return "Tagesziel inkl. Pool erreicht";
+  return "Tagesziel erreicht";
+}
+
+export function formatPoolExpiry(bucket) {
+  const days = toNumber(bucket?.days_until_expiry) || 0;
+  if (days === 0) return "Verfällt heute";
+  if (days === 1) return "Verfällt morgen";
+  return `Verfällt in ${formatPoolNumber(days)} Tagen`;
+}
+
+function consumePoolBuckets(buckets, kcalToConsume) {
+  let remainingToConsume = kcalToConsume;
+  const allocations = [];
+
+  for (const bucket of buckets) {
+    if (remainingToConsume <= 0) break;
+    const consumed = Math.min(bucket.remaining_kcal, remainingToConsume);
+    if (consumed <= 0) continue;
+    bucket.remaining_kcal -= consumed;
+    remainingToConsume -= consumed;
+    allocations.push({ source_date: bucket.source_date, kcal: consumed });
+  }
+
+  return allocations;
+}
+
+function buildDailyCalorieIndex(foodEntries, referenceDateKey) {
+  const index = new Map();
+  for (const entry of foodEntries || []) {
+    if (!entry?.date || entry.date > referenceDateKey || !parseDateKey(entry.date)) continue;
+    const summary = index.get(entry.date) || { calories_kcal: 0, count: 0 };
+    summary.calories_kcal += toNumber(entry.calories_kcal) || 0;
+    summary.count += 1;
+    index.set(entry.date, summary);
+  }
+  return index;
+}
+
+function formatPoolNumber(value) {
+  return new Intl.NumberFormat("de-CH", { maximumFractionDigits: 0 }).format(toNumber(value) || 0);
+}
+
+function sumPoolKcal(buckets) {
+  return buckets.reduce((sum, bucket) => sum + bucket.remaining_kcal, 0);
+}
+
+function daysBetween(startDate, endDate) {
+  if (!startDate || !endDate) return 0;
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+  return Math.max(0, Math.round((end - start) / 86400000));
 }
 
 export function calculateAutoTdee(weightEntries, foodEntries, referenceDateKey) {
