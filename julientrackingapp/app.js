@@ -380,7 +380,8 @@ function renderDashboardV2() {
   const goals = data.settings.goals;
   const nutrition = calculateDailyNutrition(data.food_entries, today);
   const weightStats = buildWeightStats();
-  const avgCalories7 = average(lastNDays(today, 7).map((date) => calculateDailyNutrition(data.food_entries, date).calories_kcal));
+  const lastCompletedDay = formatDateKey(addDays(parseDateKey(today), -1));
+  const avgCalories7 = average(lastNDays(lastCompletedDay, 7).map((date) => calculateDailyNutrition(data.food_entries, date).calories_kcal));
   const poolLedger = calculateCurrentPoolLedger(today);
   const calorieProgress = percent(nutrition.calories_kcal, poolLedger.total_allowance_kcal);
   const proteinProgress = percent(nutrition.protein_g, goals.protein_goal_g);
@@ -473,9 +474,10 @@ function renderDashboardV2() {
     </section>
 
     <section class="grid auto">
-      ${renderMetricCard("7 Tage Kcal", fmt(avgCalories7, 0), "Schnitt")}
-      ${renderMetricCard("Aktuell", weightStats.latest ? `${fmt(weightStats.latest.weight_kg, 1)} kg` : "-", weightStats.latest ? formatDate(weightStats.latest.date) : "Noch kein Eintrag")}
+      ${renderMetricCard("7 Tage Kcal", fmt(avgCalories7, 0), "Bis gestern")}
+      ${renderMetricCard("7-Tage-Schnitt", weightStats.avg7 ? `${fmt(weightStats.avg7, 1)} kg` : "–", "Trendgewicht")}
       ${renderMetricCard("Seit Start", weightStats.diffStart !== null ? `${fmtSigned(weightStats.diffStart, 1)} kg` : "-", "Gewicht")}
+      ${renderBmiMetricCard(weightStats.bmi)}
     </section>
 
     <section class="card">
@@ -2804,6 +2806,31 @@ function renderMetric(label, value, sub = "") {
 
 function renderMetricCard(label, value, sub = "") {
   return `<article class="card">${renderMetric(label, value, sub)}</article>`;
+}
+
+function renderBmiMetricCard(bmi) {
+  const value = toNumber(bmi);
+  const category = value !== null ? getBMICategory(value) : "Grösse und Gewicht nötig";
+  const statusClass = value === null
+    ? "unavailable"
+    : value < 18.5
+      ? "underweight"
+      : value < 25
+        ? "normal"
+        : value < 30
+          ? "overweight"
+          : "obese";
+
+  return `
+    <article class="card">
+      <div class="metric bmi-metric">
+        <div class="metric-label">BMI</div>
+        <div class="metric-value">${value !== null ? fmt(value, 1) : "–"}</div>
+        <div class="bmi-metric-detail ${statusClass}">${safe(category)}</div>
+        <div class="bmi-metric-gauge">${renderBmiGauge(value)}</div>
+      </div>
+    </article>
+  `;
 }
 
 function renderBmiGauge(bmi) {

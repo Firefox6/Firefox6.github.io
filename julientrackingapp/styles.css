@@ -624,6 +624,48 @@ h3 {
   transform: translate(-50%, -50%);
 }
 
+.bmi-metric .metric-value {
+  margin-top: 4px;
+}
+
+.bmi-metric-detail {
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 750;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bmi-metric-detail.normal {
+  color: var(--ok);
+}
+
+.bmi-metric-detail.underweight,
+.bmi-metric-detail.overweight {
+  color: var(--warn);
+}
+
+.bmi-metric-detail.obese {
+  color: var(--danger);
+}
+
+.bmi-metric-gauge {
+  margin-top: 3px;
+}
+
+.bmi-metric-gauge .bmi-gauge {
+  height: 6px;
+}
+
+.bmi-metric-gauge .bmi-gauge-marker {
+  width: 10px;
+  height: 10px;
+  box-shadow: 0 0 0 2px var(--bg), 0 2px 5px rgba(0, 0, 0, 0.32);
+}
+
 .nutrient-list {
   display: grid;
   gap: 8px;

@@ -1,4 +1,4 @@
-const APP_VERSION = "2026-08-04-qr-import-utf8-v9";
+const APP_VERSION = "2026-08-04-dashboard-bmi-v10";
 const APP_CACHE = `fittrack-app-shell-${APP_VERSION}`;
 const APP_CACHE_PREFIX = "fittrack-app-shell-";
 
