@@ -1,4 +1,4 @@
-const APP_VERSION = "2026-08-04-supabase-full-data-v7";
+const APP_VERSION = "2026-08-04-supabase-full-data-v8";
 const APP_CACHE = `fittrack-app-shell-${APP_VERSION}`;
 const APP_CACHE_PREFIX = "fittrack-app-shell-";
 

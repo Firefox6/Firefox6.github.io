@@ -64,6 +64,7 @@ import {
   saveCloudSettings,
 } from "./cloud-repository.js";
 import { isSupabaseConfigured } from "./supabase-client.js";
+import { createSharedFoodPayload, parseSharedFoodPayload } from "./share-payload.js";
 
 const app = document.querySelector("#app");
 const screenTitle = document.querySelector("#screen-title");
@@ -2625,8 +2626,7 @@ async function handleBarcodeDetected(barcode) {
 async function handleImportQrDetected(rawText) {
   const statusEl = document.querySelector("#barcode-status");
   try {
-    const payload = JSON.parse(rawText);
-    if (payload.type !== "fittrack_food_entry") throw new Error("Kein FitTrack-Eintrag.");
+    const payload = parseSharedFoodPayload(rawText);
 
     importedEntry = {
       name: payload.name || "Importierter Eintrag",
@@ -2655,22 +2655,7 @@ async function shareFoodEntry(id) {
   const entry = data.food_entries.find((item) => item.id === id);
   if (!entry) return;
 
-  const payload = JSON.stringify({
-    type: "fittrack_food_entry",
-    v: 1,
-    name: entry.name,
-    meal: entry.meal,
-    quantity: entry.quantity,
-    unit: entry.unit,
-    calories_kcal: entry.calories_kcal,
-    protein_g: entry.protein_g,
-    carbs_g: entry.carbs_g,
-    fat_g: entry.fat_g,
-    fiber_g: entry.fiber_g,
-    sugar_g: entry.sugar_g,
-    salt_g: entry.salt_g,
-    notes: entry.notes,
-  });
+  const payload = createSharedFoodPayload(entry);
 
   await openShareOverlay(payload, entry.name);
 }
@@ -2687,13 +2672,9 @@ async function openShareOverlay(text, title) {
     await loadQrCodeScript();
     new window.QRCode(container, {
       text,
-      // qrcodejs defaults to version 4, which is too small for complete
-      // food-entry payloads (especially entries created from presets).
-      // Version 0 lets the library select the smallest QR version that fits.
-      typeNumber: 0,
-      width: 240,
-      height: 240,
-      correctLevel: window.QRCode.CorrectLevel.M,
+      width: 280,
+      height: 280,
+      correctLevel: window.QRCode.CorrectLevel.L,
     });
   } catch (error) {
     overlay.hidden = true;
@@ -2710,7 +2691,9 @@ function loadQrCodeScript() {
   if (window.QRCode) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js";
+    // This maintained fork fixes qrcodejs' incorrect capacity calculation,
+    // which can otherwise throw "code length overflow" for valid payloads.
+    script.src = "https://cdn.jsdelivr.net/npm/qrcodejs2-fixes@0.0.2/qrcode.js";
     script.onload = () => resolve();
     script.onerror = () => reject(new Error("QR-Library konnte nicht geladen werden."));
     document.head.appendChild(script);
