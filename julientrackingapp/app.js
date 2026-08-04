@@ -114,6 +114,8 @@ let renderToken = 0;
 let scannedProduct = null;
 let importedEntry = null;
 let selectedImportFile = null;
+let selectedImportText = null;
+let selectedImportFileName = "";
 let scanMode = "barcode";
 let barcodeStream = null;
 let barcodeAnimationFrame = null;
@@ -121,11 +123,13 @@ let zxingControls = null;
 let cloudLoadToken = 0;
 let initialAuthHandled = false;
 const CLOUD_LOCAL_MIGRATION_KEY = "nutrition_cloud_migration_v1";
+const IMPORT_DRAFT_STORAGE_KEY = "fittrack_pending_json_import_v1";
 
 init();
 
 async function init() {
   bindEvents();
+  restorePendingImportDraft();
   const launchAction = applyLaunchAction();
   const migration = await migrateLegacyLocalStorageData();
   if (migration.migrated) {
@@ -198,6 +202,14 @@ function bindEvents() {
   app.addEventListener("submit", handleSubmit);
   app.addEventListener("change", handleChange);
   app.addEventListener("input", handleInput);
+
+  document.querySelector("#import-file")?.addEventListener("change", async (event) => {
+    try {
+      await stageImportFile(event.target.files?.[0] || null);
+    } catch (error) {
+      showToast(error.message || "Import-Datei konnte nicht gelesen werden.");
+    }
+  });
 
   document.querySelector("#barcode-overlay")?.addEventListener("click", (event) => {
     if (event.target.closest("[data-action='close-barcode-scanner']")) closeBarcodeOverlay();
@@ -701,7 +713,7 @@ function renderMoreV2() {
       </div>
       <form id="import-form" style="margin-top: 16px;">
         <div class="form-grid">
-          ${field("Import-Datei", `<input id="import-file" type="file" name="import_file" accept="application/json">`)}
+          ${field("Import-Datei", `<button class="btn ghost" type="button" data-action="select-import-file">JSON-Datei auswählen</button>`)}
           ${field("Modus", `
             <select name="import_mode">
               <option value="merge">Zusammenführen</option>
@@ -710,7 +722,7 @@ function renderMoreV2() {
             </select>
           `)}
         </div>
-        <p id="import-file-status" class="section-note" aria-live="polite">${selectedImportFile ? `Ausgewählt: ${safe(selectedImportFile.name)}` : "Noch keine Datei ausgewählt."}</p>
+        <p id="import-file-status" class="section-note" aria-live="polite">${selectedImportFileName ? `Ausgewählt: ${safe(selectedImportFileName)}` : "Noch keine Datei ausgewählt."}</p>
         <button class="btn" type="submit">Import starten</button>
       </form>
     </section>
@@ -967,6 +979,15 @@ async function handleActionClick(event) {
       await openBarcodeOverlay("import");
     }
 
+    if (action === "select-import-file") {
+      const input = document.querySelector("#import-file");
+      if (!input) throw new Error("Dateiauswahl ist nicht verfügbar.");
+      // Clearing the native control makes a deliberate second selection of the
+      // same filename dispatch a change event on Android as well.
+      input.value = "";
+      input.click();
+    }
+
     if (action === "cancel-import-scan") {
       importedEntry = null;
       await render();
@@ -1076,16 +1097,6 @@ async function handleChange(event) {
       await render();
     }
 
-    if (target.id === "import-file") {
-      selectedImportFile = target.files?.[0] || null;
-      const status = document.querySelector("#import-file-status");
-      if (status) {
-        status.textContent = selectedImportFile
-          ? `Ausgewählt: ${selectedImportFile.name}`
-          : "Noch keine Datei ausgewählt.";
-      }
-    }
-
     if (target.id === "quick-save-preset") {
       document.querySelector("#quick-preset-fields")?.toggleAttribute("hidden", !target.checked);
     }
@@ -1105,6 +1116,71 @@ async function handleChange(event) {
     showToast(error.message || "Änderung fehlgeschlagen.");
     await render();
   }
+}
+
+function restorePendingImportDraft() {
+  try {
+    const stored = sessionStorage.getItem(IMPORT_DRAFT_STORAGE_KEY);
+    if (!stored) return;
+    const draft = JSON.parse(stored);
+    if (!draft?.name || typeof draft.text !== "string") return;
+    JSON.parse(draft.text);
+    selectedImportText = draft.text;
+    selectedImportFileName = draft.name;
+  } catch {
+    clearPendingImportDraft();
+  }
+}
+
+async function stageImportFile(file) {
+  if (!file) {
+    clearPendingImportDraft();
+    updateImportFileStatus();
+    return;
+  }
+
+  const text = await file.text();
+  try {
+    JSON.parse(text);
+  } catch {
+    clearPendingImportDraft();
+    updateImportFileStatus();
+    throw new Error("Die ausgewählte Datei enthält kein gültiges JSON.");
+  }
+
+  selectedImportFile = file;
+  selectedImportText = text;
+  selectedImportFileName = file.name || "Import-Datei";
+  try {
+    sessionStorage.setItem(IMPORT_DRAFT_STORAGE_KEY, JSON.stringify({
+      name: selectedImportFileName,
+      text: selectedImportText,
+    }));
+  } catch {
+    // The in-memory copy still covers ordinary Android file-picker returns.
+  }
+  updateImportFileStatus();
+}
+
+function clearPendingImportDraft() {
+  selectedImportFile = null;
+  selectedImportText = null;
+  selectedImportFileName = "";
+  try {
+    sessionStorage.removeItem(IMPORT_DRAFT_STORAGE_KEY);
+  } catch {
+    // Session storage is optional for the import flow.
+  }
+  const input = document.querySelector("#import-file");
+  if (input) input.value = "";
+}
+
+function updateImportFileStatus() {
+  const status = document.querySelector("#import-file-status");
+  if (!status) return;
+  status.textContent = selectedImportFileName
+    ? `Ausgewählt: ${selectedImportFileName}`
+    : "Noch keine Datei ausgewählt.";
 }
 
 function handleInput(event) {
@@ -1397,11 +1473,11 @@ async function saveNotificationSettings(form) {
 }
 
 async function importData(form) {
-  const file = selectedImportFile || form.elements.namedItem("import_file")?.files?.[0];
+  const file = selectedImportFile || document.querySelector("#import-file")?.files?.[0];
   const mode = formValue(form, "import_mode");
-  if (!file) throw new Error("Bitte Import-Datei wählen.");
+  if (!selectedImportText && !file) throw new Error("Bitte Import-Datei wählen.");
 
-  const parsed = await readJsonFile(file);
+  const parsed = selectedImportText ? JSON.parse(selectedImportText) : await readJsonFile(file);
   let result;
 
   if (mode === "replace") {
@@ -1422,7 +1498,7 @@ async function importData(form) {
   if (result?.ignoredWorkoutsCount) ignored.push(`${fmt(result.ignoredWorkoutsCount, 0)} alte Workout-Einträge`);
   if (result?.ignoredBodyMeasurementsCount) ignored.push(`${fmt(result.ignoredBodyMeasurementsCount, 0)} Körpermessungen`);
   if (ignored.length) showToast(`${ignored.join(" und ")} wurden nicht importiert.`);
-  selectedImportFile = null;
+  clearPendingImportDraft();
   await refreshWeightData();
   await render();
 }
