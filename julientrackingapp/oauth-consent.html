@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="de-CH">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#f5f2ea">
+    <title>FitTrack-Zugriff bestätigen</title>
+    <link rel="icon" href="icons/icon-192.png" type="image/png">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body class="oauth-consent-page">
+    <main class="oauth-consent-shell" aria-labelledby="consent-title">
+      <p class="eyeline">FitTrack Nutrition</p>
+      <h1 id="consent-title">Verbindung bestätigen</h1>
+      <p id="consent-status" class="muted" role="status">Zustimmung wird vorbereitet …</p>
+
+      <section id="consent-details" class="card oauth-consent-card" hidden>
+        <p class="muted">Diese App möchte auf deinen persönlichen FitTrack-Account zugreifen:</p>
+        <div class="oauth-client">
+          <img id="oauth-client-logo" class="oauth-client-logo" alt="" hidden>
+          <strong id="oauth-client-name">Unbekannte App</strong>
+        </div>
+        <p class="muted">Berechtigungen</p>
+        <ul id="oauth-scopes" class="oauth-scopes"></ul>
+        <p class="oauth-note">Der Zugriff erfolgt mit deinem Supabase-Konto. Die Daten bleiben durch Row Level Security pro Konto getrennt. Du kannst die Verbindung später in ChatGPT oder deinem Supabase-Konto widerrufen.</p>
+        <div class="button-row">
+          <button id="oauth-deny" class="btn secondary" type="button">Ablehnen</button>
+          <button id="oauth-approve" class="btn primary" type="button">Zugriff erlauben</button>
+        </div>
+      </section>
+
+      <section id="login-panel" class="card oauth-consent-card" hidden>
+        <h2>Bei FitTrack anmelden</h2>
+        <p class="muted">Melde dich mit dem Konto an, dessen Daten du verbinden möchtest.</p>
+        <form id="login-form" class="stack-form">
+          <label>E-Mail<input id="login-email" type="email" autocomplete="email" required></label>
+          <label>Passwort<input id="login-password" type="password" autocomplete="current-password" required></label>
+          <button class="btn primary" type="submit">Anmelden</button>
+        </form>
+      </section>
+    </main>
+    <script type="module" src="oauth-consent.js"></script>
+  </body>
+</html>
