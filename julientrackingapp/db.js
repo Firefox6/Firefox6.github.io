@@ -67,6 +67,7 @@ let dbPromise;
 const LEGACY_DATA_STORES = ["weight_entries", "food_entries", "food_presets", "workouts", "exercise_presets"];
 export const WEIGHT_SUPABASE_MIGRATION_KEY = "weight_supabase_migration_v1";
 export const PENDING_LEGACY_WEIGHT_IMPORT_KEY = "pending_legacy_weight_import_v1";
+const LEGACY_LOCAL_STORAGE_MIGRATION_KEY = "legacy_local_storage_migration_v1";
 const LEGACY_LOCAL_STORAGE_KEYS = [
   "fittrack_data",
   "fittrack-backup",
@@ -237,7 +238,7 @@ export async function createDataSnapshot(reason, payload) {
 export async function migrateLegacyLocalStorageData() {
   if (!globalThis.localStorage) return { migrated: false, reason: "localStorage unavailable" };
 
-  const migrationKey = "legacy_local_storage_migration_v1";
+  const migrationKey = LEGACY_LOCAL_STORAGE_MIGRATION_KEY;
   const completed = await getMeta(migrationKey);
   if (completed?.value?.completed) return { migrated: false, reason: "already completed" };
 
@@ -365,6 +366,50 @@ export async function clearStagedLegacyWeightEntries() {
 export async function deleteLegacyWeightEntries() {
   await clearStore("weight_entries");
   await clearStagedLegacyWeightEntries();
+}
+
+// Removes only the IndexedDB and localStorage records that can be offered for
+// the first Supabase transfer. Backups and unrelated legacy workout data stay
+// untouched, so a user never loses data that is not part of this migration.
+export async function deleteTransferableLocalData() {
+  const legacyMigration = await getMeta(LEGACY_LOCAL_STORAGE_MIGRATION_KEY);
+  const db = await openDB();
+  const tx = db.transaction([
+    "settings",
+    "weight_entries",
+    "food_entries",
+    "food_presets",
+    "meta",
+  ], "readwrite");
+
+  for (const storeName of ["settings", "weight_entries", "food_entries", "food_presets"]) {
+    tx.objectStore(storeName).clear();
+  }
+
+  const meta = tx.objectStore("meta");
+  for (const key of [
+    PENDING_LEGACY_WEIGHT_IMPORT_KEY,
+    WEIGHT_SUPABASE_MIGRATION_KEY,
+    "last_daily_review_sent_date",
+    "last_weekly_review_sent_week",
+  ]) {
+    meta.delete(key);
+  }
+  await txDone(tx);
+
+  removeLegacyLocalStoragePayloads(legacyMigration?.value?.source_key);
+}
+
+function removeLegacyLocalStoragePayloads(sourceKey) {
+  try {
+    const keys = new Set([...LEGACY_LOCAL_STORAGE_KEYS, sourceKey].filter(Boolean));
+    for (const key of keys) {
+      const raw = localStorage.getItem(key);
+      if (parseLegacyJson(raw)) localStorage.removeItem(key);
+    }
+  } catch {
+    // localStorage is optional; IndexedDB records were already removed above.
+  }
 }
 
 function findLegacyLocalStoragePayload() {

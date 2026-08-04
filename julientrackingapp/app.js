@@ -7,7 +7,7 @@
   getMeta,
   getStagedLegacyWeightEntries,
   migrateLegacyLocalStorageData,
-  clearStagedLegacyWeightEntries,
+  deleteTransferableLocalData,
   setMeta,
   todayKey,
   toLocalIso,
@@ -234,7 +234,7 @@ async function initializeCloud() {
     if (nextStatus.status === "authenticated") {
       await refreshWeightData({ renderAfter: true });
       await loadLocalMigrationCandidate();
-      showLocalMigrationDialog();
+      if (!state.localMigration?.transferComplete) showLocalMigrationDialog();
     } else {
       data = { settings: null, weight_entries: [], food_entries: [], food_presets: [], review_status: {} };
       state.weightError = null;
@@ -290,11 +290,6 @@ async function loadLocalMigrationCandidate() {
     getMeta("last_daily_review_sent_date"),
     getMeta("last_weekly_review_sent_week"),
   ]);
-  if (migration?.value?.status === "completed") {
-    state.localMigration = null;
-    return;
-  }
-
   const byExternalId = new Map();
   for (const entry of [...storedWeights, ...staged]) {
     if (!entry?.date || toNumber(entry.weight_kg) === null) continue;
@@ -309,7 +304,14 @@ async function loadLocalMigrationCandidate() {
   const weight_entries = [...byExternalId.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)));
   const hasData = Boolean(settingsRecord) || foods.length > 0 || presets.length > 0 || weight_entries.length > 0 || Object.keys(review_status).length > 0;
   state.localMigration = hasData
-    ? { settings: settingsRecord?.value || {}, food_entries: foods, food_presets: presets, weight_entries, review_status }
+    ? {
+      settings: settingsRecord?.value || {},
+      food_entries: foods,
+      food_presets: presets,
+      weight_entries,
+      review_status,
+      transferComplete: migration?.value?.status === "completed",
+    }
     : null;
 }
 
@@ -780,14 +782,17 @@ function renderCloudAccount() {
 function renderLocalMigrationCallout() {
   const candidate = state.localMigration;
   if (!candidate) return "";
+  const transferComplete = candidate.transferComplete === true;
 
   return `
     <div class="migration-callout">
-      <strong>Lokale Nutrition-Daten gefunden.</strong>
-      <p>${fmt(candidate.food_entries.length, 0)} Kalorieneinträge, ${fmt(candidate.food_presets.length, 0)} Presets und ${fmt(candidate.weight_entries.length, 0)} Gewichtseinträge können einmalig in dieses Konto übertragen werden.</p>
+      <strong>${transferComplete ? "Lokale Nutrition-Daten wurden übertragen." : "Lokale Nutrition-Daten gefunden."}</strong>
+      <p>${fmt(candidate.food_entries.length, 0)} Kalorieneinträge, ${fmt(candidate.food_presets.length, 0)} Presets und ${fmt(candidate.weight_entries.length, 0)} Gewichtseinträge ${transferComplete ? "liegen noch auf diesem Gerät." : "können einmalig in dieses Konto übertragen werden."}</p>
       <div class="button-row">
-        <button class="btn primary" type="button" data-action="migrate-local-data">Jetzt nach Supabase übertragen</button>
+        ${transferComplete ? "" : `<button class="btn primary" type="button" data-action="migrate-local-data">Jetzt nach Supabase übertragen</button>`}
+        <button class="btn danger" type="button" data-action="delete-local-data">Lokale Daten löschen</button>
       </div>
+      <p class="section-note">Supabase-Daten und vorhandene lokale Sicherungen bleiben erhalten.</p>
     </div>
   `;
 }
@@ -807,6 +812,7 @@ function showLocalMigrationDialog() {
       <p class="section-note">${fmt(candidate.food_entries.length, 0)} Kalorieneinträge · ${fmt(candidate.food_presets.length, 0)} Presets · ${fmt(candidate.weight_entries.length, 0)} Gewichtseinträge</p>
       <div class="button-row">
         <button class="btn primary" type="button" data-local-migration-action="migrate">Nach Supabase übertragen</button>
+        <button class="btn danger" type="button" data-local-migration-action="delete">Lokal löschen</button>
         <button class="btn ghost" type="button" data-local-migration-action="close">Später entscheiden</button>
       </div>
     </div>
@@ -817,8 +823,11 @@ function showLocalMigrationDialog() {
     if (!action) return;
     if (action === "close") return dialog.remove();
     try {
-      await migrateCurrentLocalData();
-      dialog.remove();
+      if (action === "migrate") {
+        await migrateCurrentLocalData();
+        dialog.remove();
+      }
+      if (action === "delete" && await deleteCurrentLocalData()) dialog.remove();
     } catch (error) {
       showToast(error.message || "Migration fehlgeschlagen.");
     }
@@ -840,11 +849,30 @@ async function migrateCurrentLocalData() {
     completed_at: toLocalIso(),
     counts: result.counts,
   });
-  await clearStagedLegacyWeightEntries();
-  state.localMigration = null;
+  state.localMigration = { ...candidate, transferComplete: true };
   await refreshWeightData();
   showToast("Lokale Nutrition-Daten wurden nach Supabase übertragen.");
   await render();
+}
+
+async function deleteCurrentLocalData() {
+  const candidate = state.localMigration;
+  if (!candidate || state.authStatus.status !== "authenticated") return false;
+
+  const confirmed = confirm(
+    "Lokale Nutrition-Daten löschen?\n\nDie Kalorieneinträge, Presets, Gewichtseinträge, Einstellungen und Review-Informationen dieses Geräts werden entfernt. Deine Supabase-Daten bleiben unverändert.",
+  );
+  if (!confirmed) return false;
+
+  await deleteTransferableLocalData();
+  await setMeta(`${CLOUD_LOCAL_MIGRATION_KEY}:${state.authStatus.user.id}`, {
+    status: "local_data_deleted",
+    deleted_at: toLocalIso(),
+  });
+  state.localMigration = null;
+  showToast("Lokale Nutrition-Daten wurden gelöscht.");
+  await render();
+  return true;
 }
 
 function renderWeight() {
@@ -1058,6 +1086,10 @@ async function handleActionClick(event) {
 
     if (action === "migrate-local-data") {
       await migrateCurrentLocalData();
+    }
+
+    if (action === "delete-local-data") {
+      await deleteCurrentLocalData();
     }
   } catch (error) {
     showToast(error.message || "Aktion fehlgeschlagen.");
