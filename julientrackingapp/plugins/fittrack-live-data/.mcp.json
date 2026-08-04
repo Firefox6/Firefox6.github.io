@@ -1,1 +1,6 @@
-
+{
+  "fittrack-live-data": {
+    "type": "http",
+    "url": "https://fvaaccshuxkvvythbuon.supabase.co/functions/v1/fittrack-mcp/mcp"
+  }
+}
