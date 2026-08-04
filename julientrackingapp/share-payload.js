@@ -21,7 +21,12 @@ export function createSharedFoodPayload(entry) {
 }
 
 export function parseSharedFoodPayload(rawText) {
-  const payload = JSON.parse(rawText);
+  // qrcodejs adds an UTF-8 byte-order mark when a payload contains umlauts
+  // or other non-ASCII characters. Some camera decoders preserve that mark,
+  // while JSON.parse rejects it. Preset names frequently contain umlauts, so
+  // remove the marker before parsing the shared entry.
+  const text = String(rawText ?? "").replace(/^\uFEFF/, "");
+  const payload = JSON.parse(text);
 
   if (Array.isArray(payload)) {
     if (payload[0] !== COMPACT_FOOD_ENTRY_FORMAT) {

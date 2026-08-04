@@ -1,4 +1,4 @@
-const APP_VERSION = "2026-08-04-supabase-full-data-v8";
+const APP_VERSION = "2026-08-04-qr-import-utf8-v9";
 const APP_CACHE = `fittrack-app-shell-${APP_VERSION}`;
 const APP_CACHE_PREFIX = "fittrack-app-shell-";
 
@@ -14,6 +14,7 @@ const CORE_ASSETS = [
   "./auth-service.js",
   "./weight-repository.js",
   "./cloud-repository.js",
+  "./share-payload.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
