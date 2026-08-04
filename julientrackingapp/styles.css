@@ -955,6 +955,19 @@ form > button {
   color: #fff;
 }
 
+.barcode-overlay-head .btn.ghost {
+  border-color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  box-shadow: none;
+}
+
+.barcode-overlay-head .btn.ghost:hover,
+.barcode-overlay-head .btn.ghost:focus-visible {
+  border-color: #fff;
+  background: rgba(255, 255, 255, 0.28);
+}
+
 .barcode-video {
   flex: 1;
   width: 100%;

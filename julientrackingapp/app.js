@@ -2616,6 +2616,10 @@ async function openShareOverlay(text, title) {
     await loadQrCodeScript();
     new window.QRCode(container, {
       text,
+      // qrcodejs defaults to version 4, which is too small for complete
+      // food-entry payloads (especially entries created from presets).
+      // Version 0 lets the library select the smallest QR version that fits.
+      typeNumber: 0,
       width: 240,
       height: 240,
       correctLevel: window.QRCode.CorrectLevel.M,
