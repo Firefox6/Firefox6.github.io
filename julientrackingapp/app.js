@@ -1,22 +1,16 @@
 ﻿import {
-  deleteItem,
+  createDataSnapshot,
   generateId,
   getAll,
   getItem,
   getLegacyWeightEntries,
   getMeta,
-  getSettings,
   getStagedLegacyWeightEntries,
   migrateLegacyLocalStorageData,
-  putItem,
-  saveSettings,
-  setMeta,
-  stageLegacyWeightImport,
   clearStagedLegacyWeightEntries,
-  deleteLegacyWeightEntries,
+  setMeta,
   todayKey,
   toLocalIso,
-  WEIGHT_SUPABASE_MIGRATION_KEY,
 } from "./db.js";
 import {
   addDays,
@@ -40,6 +34,7 @@ import {
   downloadJson,
   downloadFullExport,
   mergeImportData,
+  migrateLocalDataToCloud,
   readJsonFile,
   replaceAllData,
 } from "./export-import.js";
@@ -53,11 +48,17 @@ import {
 import {
   createManualWeightMeasurement,
   deleteManualWeightMeasurement,
-  exportCloudWeights,
-  getDailyWeightSeries,
-  migrateLegacyWeightEntries,
   updateManualWeightMeasurement,
 } from "./weight-repository.js";
+import {
+  deleteCloudFoodEntry,
+  deleteCloudFoodPreset,
+  loadCloudSnapshot,
+  saveCloudFoodEntry,
+  saveCloudFoodPreset,
+  saveCloudMetadata,
+  saveCloudSettings,
+} from "./cloud-repository.js";
 import { isSupabaseConfigured } from "./supabase-client.js";
 
 const app = document.querySelector("#app");
@@ -97,8 +98,7 @@ const state = {
   weightLoading: false,
   weightError: null,
   lastWeightSyncAt: null,
-  legacyWeightEntries: [],
-  discardedLegacyBodyMeasurements: 0,
+  localMigration: null,
 };
 
 let data = {
@@ -106,6 +106,7 @@ let data = {
   weight_entries: [],
   food_entries: [],
   food_presets: [],
+  review_status: {},
 };
 
 let toastTimer = null;
@@ -116,6 +117,9 @@ let scanMode = "barcode";
 let barcodeStream = null;
 let barcodeAnimationFrame = null;
 let zxingControls = null;
+let cloudLoadToken = 0;
+let initialAuthHandled = false;
+const CLOUD_LOCAL_MIGRATION_KEY = "nutrition_cloud_migration_v1";
 
 init();
 
@@ -126,8 +130,8 @@ async function init() {
   if (migration.migrated) {
     showToast("Alte lokale Daten wurden sicher übernommen.");
   }
-  await render();
   await initializeCloud();
+  await render();
   registerServiceWorker();
 
   if (launchAction === "barcode") {
@@ -172,8 +176,12 @@ function bindEvents() {
     const button = event.target.closest("[data-global-action]");
     if (!button) return;
     if (button.dataset.globalAction === "sync-render") {
-      await render();
-      showToast("Ansicht aktualisiert.");
+      if (state.authStatus.status === "authenticated") {
+        await refreshWeightData({ renderAfter: true });
+        showToast(state.weightError || "Cloud-Daten aktualisiert.");
+      } else {
+        await render();
+      }
     }
   });
 
@@ -203,86 +211,93 @@ function bindEvents() {
 }
 
 async function loadData() {
-  const [settings, foods, foodPresets] = await Promise.all([
-    getSettings(),
-    getAll("food_entries"),
-    getAll("food_presets"),
-  ]);
-
-  return {
-    settings,
-    food_entries: foods.sort((a, b) => `${a.date || ""}${a.created_at || ""}`.localeCompare(`${b.date || ""}${b.created_at || ""}`)),
-    food_presets: foodPresets.sort((a, b) => (a.name || "").localeCompare(b.name || "")),
-  };
+  return data;
 }
 
 async function initializeCloud() {
-  state.authStatus = await initializeAuth(async (nextStatus) => {
+  state.authStatus = await initializeAuth(async (nextStatus, event = {}) => {
+    if (event.type === "INITIAL_SESSION" && initialAuthHandled) return;
     state.authStatus = nextStatus;
     if (nextStatus.status === "authenticated") {
       await refreshWeightData({ renderAfter: true });
-      await loadLegacyWeightMigrationCandidate();
-      showLegacyWeightMigrationDialog();
+      await loadLocalMigrationCandidate();
+      showLocalMigrationDialog();
     } else {
-      data.weight_entries = [];
+      data = { settings: null, weight_entries: [], food_entries: [], food_presets: [], review_status: {} };
       state.weightError = null;
       state.weightLoading = false;
       state.lastWeightSyncAt = null;
-      state.legacyWeightEntries = [];
-      state.discardedLegacyBodyMeasurements = 0;
+      state.localMigration = null;
       await render();
     }
+    if (event.type === "initial") initialAuthHandled = true;
   });
 
-  if (state.authStatus.status === "authenticated") {
-    await refreshWeightData({ renderAfter: true });
-    await loadLegacyWeightMigrationCandidate();
-    showLegacyWeightMigrationDialog();
-  } else {
-    await render();
-  }
+  if (!initialAuthHandled) await render();
 }
 
 async function refreshWeightData({ renderAfter = false } = {}) {
   if (state.authStatus.status !== "authenticated") {
-    data.weight_entries = [];
+    data = { settings: null, weight_entries: [], food_entries: [], food_presets: [], review_status: {} };
     state.weightLoading = false;
     if (renderAfter) await render();
     return;
   }
 
+  const requestToken = ++cloudLoadToken;
   state.weightLoading = true;
   state.weightError = null;
   if (renderAfter) await render();
 
   try {
-    data.weight_entries = await getDailyWeightSeries();
+    const snapshot = await loadCloudSnapshot();
+    if (requestToken !== cloudLoadToken) return;
+    data = { ...data, ...snapshot };
     state.lastWeightSyncAt = toLocalIso();
   } catch (error) {
-    state.weightError = error.message || "Gewichtsdaten konnten nicht mit Supabase verbunden werden.";
+    if (requestToken !== cloudLoadToken) return;
+    state.weightError = error.message || "Cloud-Daten konnten nicht mit Supabase verbunden werden.";
   } finally {
-    state.weightLoading = false;
+    if (requestToken === cloudLoadToken) state.weightLoading = false;
   }
 
   if (renderAfter) await render();
 }
 
-async function loadLegacyWeightMigrationCandidate() {
+async function loadLocalMigrationCandidate() {
   if (state.authStatus.status !== "authenticated") return;
-  const [migration, staged] = await Promise.all([
-    getMeta(WEIGHT_SUPABASE_MIGRATION_KEY),
+  const migrationKey = `${CLOUD_LOCAL_MIGRATION_KEY}:${state.authStatus.user.id}`;
+  const [migration, settingsRecord, foods, presets, storedWeights, staged, dailyReview, weeklyReview] = await Promise.all([
+    getMeta(migrationKey),
+    getItem("settings", "settings"),
+    getAll("food_entries"),
+    getAll("food_presets"),
+    getLegacyWeightEntries(),
     getStagedLegacyWeightEntries(),
+    getMeta("last_daily_review_sent_date"),
+    getMeta("last_weekly_review_sent_week"),
   ]);
-  const stored = migration?.value?.status === "completed"
-    ? []
-    : await getLegacyWeightEntries();
+  if (migration?.value?.status === "completed") {
+    state.localMigration = null;
+    return;
+  }
+
   const byExternalId = new Map();
-  for (const entry of [...stored, ...staged]) {
+  for (const entry of [...storedWeights, ...staged]) {
     if (!entry?.date || toNumber(entry.weight_kg) === null) continue;
     const key = entry.id || `${entry.date}:${entry.weight_kg}:${entry.updated_at || entry.created_at || ""}`;
     byExternalId.set(key, entry);
   }
-  state.legacyWeightEntries = [...byExternalId.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+  const review_status = {
+    ...(dailyReview?.value ? { last_daily_review_sent_date: dailyReview.value } : {}),
+    ...(weeklyReview?.value ? { last_weekly_review_sent_week: weeklyReview.value } : {}),
+  };
+  const weight_entries = [...byExternalId.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const hasData = Boolean(settingsRecord) || foods.length > 0 || presets.length > 0 || weight_entries.length > 0 || Object.keys(review_status).length > 0;
+  state.localMigration = hasData
+    ? { settings: settingsRecord?.value || {}, food_entries: foods, food_presets: presets, weight_entries, review_status }
+    : null;
 }
 
 async function render() {
@@ -297,14 +312,17 @@ async function render() {
     button.classList.toggle("is-active", button.dataset.tab === state.tab);
   });
 
-  const body = {
-    dashboard: renderDashboardV2,
-    weight: renderWeight,
-    calories: renderCaloriesV2,
-    more: renderMoreV2,
-  }[state.tab]();
+  const readyForCloudData = state.authStatus.status === "authenticated" && data.settings && !state.weightError;
+  const body = readyForCloudData
+    ? {
+      dashboard: renderDashboardV2,
+      weight: renderWeight,
+      calories: renderCaloriesV2,
+      more: renderMoreV2,
+    }[state.tab]()
+    : renderCloudRequiredState();
 
-  const reminder = state.tab === "more" ? renderReminderBanner() : "";
+  const reminder = readyForCloudData && state.tab === "more" ? renderReminderBanner() : "";
   app.innerHTML = `<div class="screen-stack">${reminder}${body}</div>`;
   requestAnimationFrame(drawCharts);
 }
@@ -320,6 +338,21 @@ function applyTheme(settings) {
   if (themeColorMeta) {
     themeColorMeta.content = resolved === "dark" ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
   }
+}
+
+function renderCloudRequiredState() {
+  const loading = state.authStatus.status === "checking" || state.weightLoading;
+  const title = loading ? "Cloud-Daten werden geladen" : "Cloud-Verbindung erforderlich";
+  const detail = loading
+    ? "Deine Nutrition-Daten werden sicher aus Supabase geladen …"
+    : state.weightError || state.authStatus.error || "Melde dich an und stelle eine Internetverbindung her, um deine Nutrition-Daten zu verwenden.";
+  return `
+    <section class="card cloud-empty-state">
+      <h2>${safe(title)}</h2>
+      <p class="section-note">${safe(detail)}</p>
+    </section>
+    ${renderCloudAccount()}
+  `;
 }
 
 function renderDashboardV2() {
@@ -441,7 +474,7 @@ function renderWeightChartOrStatus() {
     return `<div class="empty">Gewichtsdaten werden geladen …</div>`;
   }
   if (state.weightError && !data.weight_entries.length) {
-    return `<div class="empty">Gewichtsdaten konnten nicht mit Supabase verbunden werden. Dein Kalorientracking funktioniert weiterhin lokal.</div>`;
+    return `<div class="empty">Gewichtsdaten konnten nicht mit Supabase verbunden werden.</div>`;
   }
   return `
     <div class="chart-scroll" data-chart-scroll="dashboard-weight">
@@ -540,7 +573,7 @@ function renderMoreV2() {
       ${renderMetricCard("Alter", age !== null ? fmt(age, 0) : "–", "aus Geburtsdatum")}
       ${renderMetricCard("Grösse", settings.profile.height_cm ? `${fmt(settings.profile.height_cm, 0)} cm` : "–", "Profil")}
       ${renderMetricCard("Kalorienziel", goalSummary(settings.goals.calorie_goal_kcal, "kcal"), "primär")}
-      ${renderMetricCard("Lokale Daten", `${data.food_entries.length + data.food_presets.length}`, "Einträge & Presets")}
+      ${renderMetricCard("Cloud-Daten", `${data.food_entries.length + data.food_presets.length}`, "Einträge & Presets")}
     </section>
 
     ${renderCloudAccount()}
@@ -655,7 +688,7 @@ function renderMoreV2() {
       <div class="section-head">
         <div>
           <h2>Daten</h2>
-          <p class="section-note">Lokaler Nutrition-Export ohne Gewicht und ohne Trainingsdaten.</p>
+          <p class="section-note">Vollständiger Supabase-Export mit Einstellungen, Kalorien, Presets und Gewicht.</p>
         </div>
       </div>
       <div class="grid auto">
@@ -699,25 +732,24 @@ function renderCloudAccount() {
       <div class="section-head">
         <div>
           <h2>Cloud-Konto</h2>
-          <p class="section-note">Gewicht wird ausschliesslich in Supabase gespeichert. Kalorien bleiben lokal auf diesem Gerät.</p>
+          <p class="section-note">Alle Nutrition-Daten werden sicher in deinem Supabase-Konto gespeichert.</p>
         </div>
         <span class="pill ${isSignedIn ? "ok" : ""}">${safe(statusText)}</span>
       </div>
       ${isSignedIn ? `
         <div class="grid auto">
           ${renderMetric("Konto", status.user?.email || "–", "Supabase")}
-          ${renderMetric("Letzte Gewichtsabfrage", state.lastWeightSyncAt ? formatDateTime(state.lastWeightSyncAt) : "–", state.weightLoading ? "wird aktualisiert" : "Cloud")}
+          ${renderMetric("Letzte Cloud-Abfrage", state.lastWeightSyncAt ? formatDateTime(state.lastWeightSyncAt) : "–", state.weightLoading ? "wird aktualisiert" : "Cloud")}
         </div>
-        ${state.weightError ? `<p class="inline-notice warn">${safe(state.weightError)} Dein Kalorientracking funktioniert weiterhin lokal.</p>` : ""}
+        ${state.weightError ? `<p class="inline-notice warn">${safe(state.weightError)}</p>` : ""}
         <div class="button-row" style="margin-top: 14px;">
           <button class="btn ghost" type="button" data-action="test-cloud-connection">Verbindung testen</button>
-          <button class="btn primary" type="button" data-action="refresh-cloud-weights" ${state.weightLoading ? "disabled" : ""}>${state.weightLoading ? "Aktualisiere …" : "Gewichte aktualisieren"}</button>
-          <button class="btn ghost" type="button" data-action="export-cloud-weights">Cloud-Gewichte exportieren</button>
+          <button class="btn primary" type="button" data-action="refresh-cloud-weights" ${state.weightLoading ? "disabled" : ""}>${state.weightLoading ? "Aktualisiere …" : "Cloud-Daten aktualisieren"}</button>
           <button class="btn danger" type="button" data-action="logout-cloud">Abmelden</button>
         </div>
-        ${renderLegacyWeightMigration()}
+        ${renderLocalMigrationCallout()}
       ` : `
-        <p class="inline-notice">Gewicht wird noch nicht geladen. Melde dich an, um deinen gemeinsamen Gewichtsverlauf zu sehen.</p>
+        <p class="inline-notice">Melde dich an, um deine vollständigen Nutrition-Daten zu laden.</p>
         ${status.error ? `<p class="inline-notice warn">${safe(status.error)}</p>` : ""}
         <form id="cloud-login-form">
           <div class="form-grid">
@@ -731,59 +763,47 @@ function renderCloudAccount() {
   `;
 }
 
-function renderLegacyWeightMigration() {
-  const entries = state.legacyWeightEntries;
-  if (!entries.length) return "";
+function renderLocalMigrationCallout() {
+  const candidate = state.localMigration;
+  if (!candidate) return "";
 
   return `
     <div class="migration-callout">
-      <strong>${fmt(entries.length, 0)} lokale Gewichtseinträge gefunden.</strong>
-      <p>Diese Einträge werden künftig zentral in Supabase gespeichert, damit Nutrition- und Fitness-App dieselben Daten verwenden.</p>
+      <strong>Lokale Nutrition-Daten gefunden.</strong>
+      <p>${fmt(candidate.food_entries.length, 0)} Kalorieneinträge, ${fmt(candidate.food_presets.length, 0)} Presets und ${fmt(candidate.weight_entries.length, 0)} Gewichtseinträge können einmalig in dieses Konto übertragen werden.</p>
       <div class="button-row">
-        <button class="btn primary" type="button" data-action="migrate-legacy-weights">Nach Supabase übertragen</button>
-        <button class="btn ghost" type="button" data-action="download-legacy-weights">Vorher als JSON herunterladen</button>
-        <button class="btn danger" type="button" data-action="delete-legacy-weights">Lokal löschen</button>
+        <button class="btn primary" type="button" data-action="migrate-local-data">Jetzt nach Supabase übertragen</button>
       </div>
     </div>
   `;
 }
 
-function showLegacyWeightMigrationDialog() {
-  if (state.authStatus.status !== "authenticated" || !state.legacyWeightEntries.length) return;
-  if (document.querySelector("#legacy-weight-migration-dialog")) return;
+function showLocalMigrationDialog() {
+  const candidate = state.localMigration;
+  if (state.authStatus.status !== "authenticated" || !candidate) return;
+  if (document.querySelector("#local-data-migration-dialog")) return;
 
   const dialog = document.createElement("div");
-  dialog.id = "legacy-weight-migration-dialog";
+  dialog.id = "local-data-migration-dialog";
   dialog.className = "modal-backdrop";
   dialog.innerHTML = `
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="legacy-weight-migration-title">
-      <h2 id="legacy-weight-migration-title">Lokale Gewichtsdaten gefunden</h2>
-      <p>${fmt(state.legacyWeightEntries.length, 0)} lokale Gewichtseinträge können jetzt in dein Supabase-Konto übertragen werden.</p>
-      <p class="section-note">Beim Übertragen erhalten alle Einträge die Quelle <code>legacy_import</code>. Alternativ kannst du die lokalen Altgewichte dauerhaft löschen.</p>
-      ${state.discardedLegacyBodyMeasurements ? `<p class="section-note">${fmt(state.discardedLegacyBodyMeasurements, 0)} alte Körpermessungen wurden nicht importiert, da sie nicht mehr Teil der Nutrition-App sind.</p>` : ""}
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="local-data-migration-title">
+      <h2 id="local-data-migration-title">Lokale Daten übernehmen</h2>
+      <p>Diese Daten wurden auf diesem Gerät gefunden und können einmalig in dein angemeldetes Supabase-Konto übertragen werden.</p>
+      <p class="section-note">${fmt(candidate.food_entries.length, 0)} Kalorieneinträge · ${fmt(candidate.food_presets.length, 0)} Presets · ${fmt(candidate.weight_entries.length, 0)} Gewichtseinträge</p>
       <div class="button-row">
-        <button class="btn primary" type="button" data-legacy-dialog-action="migrate">Nach Supabase übertragen</button>
-        <button class="btn danger" type="button" data-legacy-dialog-action="delete">Lokal löschen</button>
-        <button class="btn ghost" type="button" data-legacy-dialog-action="close">Später entscheiden</button>
+        <button class="btn primary" type="button" data-local-migration-action="migrate">Nach Supabase übertragen</button>
+        <button class="btn ghost" type="button" data-local-migration-action="close">Später entscheiden</button>
       </div>
     </div>
   `;
   document.body.appendChild(dialog);
-
   dialog.addEventListener("click", async (event) => {
-    const action = event.target.closest("[data-legacy-dialog-action]")?.dataset.legacyDialogAction;
+    const action = event.target.closest("[data-local-migration-action]")?.dataset.localMigrationAction;
     if (!action) return;
-    if (action === "close") {
-      dialog.remove();
-      return;
-    }
-
+    if (action === "close") return dialog.remove();
     try {
-      if (action === "migrate") await migrateCurrentLegacyWeights();
-      if (action === "delete") {
-        if (!confirm("Lokale Altgewichte dauerhaft löschen? Dieser Schritt kann nicht rückgängig gemacht werden.")) return;
-        await deleteCurrentLegacyWeights();
-      }
+      await migrateCurrentLocalData();
       dialog.remove();
     } catch (error) {
       showToast(error.message || "Migration fehlgeschlagen.");
@@ -791,32 +811,25 @@ function showLegacyWeightMigrationDialog() {
   });
 }
 
-async function migrateCurrentLegacyWeights() {
-  const result = await migrateLegacyWeightEntries(state.legacyWeightEntries);
-  await setMeta(WEIGHT_SUPABASE_MIGRATION_KEY, {
+async function migrateCurrentLocalData() {
+  const candidate = state.localMigration;
+  if (!candidate || state.authStatus.status !== "authenticated") return;
+
+  await createDataSnapshot("before-first-cloud-migration", {
+    schema_version: 3,
+    exported_at: toLocalIso(),
+    ...candidate,
+  });
+  const result = await migrateLocalDataToCloud(candidate);
+  await setMeta(`${CLOUD_LOCAL_MIGRATION_KEY}:${state.authStatus.user.id}`, {
     status: "completed",
-    migrated_count: result.migratedCount,
     completed_at: toLocalIso(),
+    counts: result.counts,
   });
   await clearStagedLegacyWeightEntries();
-  state.legacyWeightEntries = [];
-  state.discardedLegacyBodyMeasurements = 0;
+  state.localMigration = null;
   await refreshWeightData();
-  showToast(`${fmt(result.migratedCount, 0)} Gewichtseinträge als Legacy-Import übertragen.`);
-  await render();
-}
-
-async function deleteCurrentLegacyWeights() {
-  const deletedCount = state.legacyWeightEntries.length;
-  await deleteLegacyWeightEntries();
-  await setMeta(WEIGHT_SUPABASE_MIGRATION_KEY, {
-    status: "discarded",
-    deleted_count: deletedCount,
-    discarded_at: toLocalIso(),
-  });
-  state.legacyWeightEntries = [];
-  state.discardedLegacyBodyMeasurements = 0;
-  showToast(`${fmt(deletedCount, 0)} lokale Gewichtseinträge gelöscht.`);
+  showToast("Lokale Nutrition-Daten wurden nach Supabase übertragen.");
   await render();
 }
 
@@ -829,7 +842,7 @@ function renderWeight() {
     return `
       <section class="card cloud-empty-state">
         <h2>Gewicht in der Cloud</h2>
-        <p class="section-note">Für Gewichtsdaten bei Supabase anmelden. Dein Kalorientracking funktioniert weiterhin vollständig lokal.</p>
+        <p class="section-note">Für deine Nutrition-Daten bei Supabase anmelden.</p>
         <button class="btn primary" type="button" data-action="open-cloud-account">Cloud-Konto öffnen</button>
       </section>
     `;
@@ -892,7 +905,6 @@ async function handleActionClick(event) {
       await confirmDelete("Gewichtseintrag löschen?", async () => {
         await deleteManualWeightMeasurement(button.dataset.id);
         state.weightEditId = null;
-        await refreshWeightData();
       });
     }
 
@@ -968,14 +980,14 @@ async function handleActionClick(event) {
 
     if (action === "delete-food") {
       await confirmDelete("Kalorieneintrag löschen?", async () => {
-        await deleteItem("food_entries", button.dataset.id);
+        await deleteCloudFoodEntry(button.dataset.id);
         if (state.foodEntryEditId === button.dataset.id) state.foodEntryEditId = null;
       });
     }
 
     if (action === "delete-food-preset") {
       await confirmDelete("Preset löschen?", async () => {
-        await deleteItem("food_presets", button.dataset.id);
+        await deleteCloudFoodPreset(button.dataset.id);
         if (state.foodPresetEditId === button.dataset.id) state.foodPresetEditId = null;
       });
     }
@@ -1002,7 +1014,7 @@ async function handleActionClick(event) {
     if (action === "logout-cloud") {
       await logout();
       state.authStatus = getAuthState();
-      data.weight_entries = [];
+      data = { settings: null, weight_entries: [], food_entries: [], food_presets: [], review_status: {} };
       state.weightError = null;
       state.lastWeightSyncAt = null;
       state.weightEditId = null;
@@ -1018,37 +1030,11 @@ async function handleActionClick(event) {
     if (action === "refresh-cloud-weights") {
       await refreshWeightData({ renderAfter: true });
       if (state.weightError) throw new Error(state.weightError);
-      showToast("Gewichte aktualisiert.");
+      showToast("Cloud-Daten aktualisiert.");
     }
 
-    if (action === "export-cloud-weights") {
-      const weights = await exportCloudWeights();
-      downloadJson({
-        schema_version: 1,
-        type: "fittrack_cloud_weights",
-        exported_at: toLocalIso(),
-        weight_measurements: weights,
-      }, `fittrack-cloud-weights-${todayKey()}.json`);
-      showToast("Cloud-Gewichte exportiert.");
-    }
-
-    if (action === "download-legacy-weights") {
-      downloadJson({
-        schema_version: 1,
-        type: "fittrack_legacy_weights",
-        exported_at: toLocalIso(),
-        weight_entries: state.legacyWeightEntries,
-      }, `fittrack-legacy-weights-${todayKey()}.json`);
-      showToast("Lokale Gewichtseinträge exportiert.");
-    }
-
-    if (action === "migrate-legacy-weights") {
-      await migrateCurrentLegacyWeights();
-    }
-
-    if (action === "delete-legacy-weights") {
-      if (!confirm("Lokale Altgewichte dauerhaft löschen? Dieser Schritt kann nicht rückgängig gemacht werden.")) return;
-      await deleteCurrentLegacyWeights();
+    if (action === "migrate-local-data") {
+      await migrateCurrentLocalData();
     }
   } catch (error) {
     showToast(error.message || "Aktion fehlgeschlagen.");
@@ -1142,12 +1128,6 @@ async function saveWeightEntry(form) {
 async function submitCloudLogin(form) {
   await loginWithPassword(formValue(form, "email"), formValue(form, "password"));
   state.authStatus = getAuthState();
-  await refreshWeightData();
-  await loadLegacyWeightMigrationCandidate();
-  // The auth listener normally opens this dialog as well. Calling it here
-  // makes the migration prompt reliable even if the listener has already
-  // fired before the legacy rows finished loading.
-  showLegacyWeightMigrationDialog();
   showToast("Mit Supabase verbunden.");
   await render();
 }
@@ -1158,7 +1138,7 @@ async function saveQuickFood(form) {
   if (!name) throw new Error("Bitte Name eintragen.");
 
   if (entryId) {
-    const existing = await getItem("food_entries", entryId);
+    const existing = data.food_entries.find((entry) => entry.id === entryId);
     if (!existing) throw new Error("Eintrag nicht gefunden.");
     const updated = buildFoodEntryFromForm(form, {
       id: existing.id,
@@ -1170,8 +1150,9 @@ async function saveQuickFood(form) {
       preset_id: existing.preset_id,
     });
     updated.created_at = existing.created_at;
-    await putItem("food_entries", updated);
+    await saveCloudFoodEntry(updated);
     state.foodEntryEditId = null;
+    await refreshWeightData();
     showToast("Eintrag aktualisiert.");
     await render();
     return;
@@ -1204,12 +1185,13 @@ async function saveQuickFood(form) {
       salt_g: entry.salt_g,
       tags: [],
     });
-    await putItem("food_presets", preset);
+    await saveCloudFoodPreset(preset);
     presetId = preset.id;
   }
 
   entry.preset_id = presetId;
-  await putItem("food_entries", entry);
+  await saveCloudFoodEntry(entry);
+  await refreshWeightData();
   showToast("Schnelleintrag gespeichert.");
   await render();
 }
@@ -1223,7 +1205,7 @@ async function saveFoodFromPreset(form) {
   const factor = quantity / (toNumber(preset.base_quantity) || 1);
   const now = toLocalIso();
 
-  await putItem("food_entries", {
+  await saveCloudFoodEntry({
     id: generateId("food"),
     date: state.selectedDate,
     meal: formValue(form, "meal"),
@@ -1243,6 +1225,7 @@ async function saveFoodFromPreset(form) {
     updated_at: now,
   });
 
+  await refreshWeightData();
   showToast("Preset eingetragen.");
   await render();
 }
@@ -1251,7 +1234,7 @@ async function saveFoodPreset(form) {
   const name = formValue(form, "name");
   if (!name) throw new Error("Bitte Name eintragen.");
   const presetId = formValue(form, "preset_id");
-  const existing = presetId ? await getItem("food_presets", presetId) : null;
+  const existing = presetId ? data.food_presets.find((preset) => preset.id === presetId) : null;
 
   const preset = buildPresetFromValues({
     name,
@@ -1272,7 +1255,8 @@ async function saveFoodPreset(form) {
     preset.created_at = existing.created_at || preset.created_at;
   }
 
-  await putItem("food_presets", preset);
+  await saveCloudFoodPreset(preset);
+  await refreshWeightData();
   showToast(existing ? "Preset aktualisiert." : "Preset gespeichert.");
   state.foodPresetEditId = null;
   state.caloriePanel = "preset";
@@ -1312,14 +1296,15 @@ async function saveBarcodeFood(form) {
       salt_g: scaleOptional(entry.salt_g, factor),
       tags: ["Barcode"],
     });
-    await putItem("food_presets", preset);
+    await saveCloudFoodPreset(preset);
     presetId = preset.id;
   }
 
   entry.preset_id = presetId;
-  await putItem("food_entries", entry);
+  await saveCloudFoodEntry(entry);
   scannedProduct = null;
   state.caloriePanel = "quick";
+  await refreshWeightData();
   showToast("Eintrag gespeichert.");
   await render();
 }
@@ -1329,7 +1314,7 @@ async function saveProfileSettings(form) {
   settings.profile.height_cm = optionalPositiveNumber(form, "height_cm", "Körpergrösse muss > 0 sein.");
   settings.profile.birth_date = formValue(form, "birth_date");
   settings.profile.sex = normalizeSex(formValue(form, "sex"));
-  await saveSettings(settings);
+  data.settings = await saveCloudSettings(settings);
   showToast("Profil gespeichert.");
   await render();
 }
@@ -1342,7 +1327,7 @@ async function saveGoalSettings(form) {
   delete settings.goals.training_days_goal_per_week;
   delete settings.goals.strength_goal_per_week;
   delete settings.goals.cardio_goal_per_week;
-  await saveSettings(settings);
+  data.settings = await saveCloudSettings(settings);
   showToast("Ziele gespeichert.");
   await render();
 }
@@ -1351,7 +1336,7 @@ async function savePreferenceSettings(form) {
   const settings = structuredClone(data.settings);
   const theme = formValue(form, "theme");
   settings.preferences.theme = ["system", "light", "dark"].includes(theme) ? theme : "system";
-  await saveSettings(settings);
+  data.settings = await saveCloudSettings(settings);
   showToast("Darstellung gespeichert.");
   await render();
 }
@@ -1363,7 +1348,7 @@ async function saveMaintenanceSettings(form) {
   if (settings.maintenance.max_kcal && settings.maintenance.min_kcal && settings.maintenance.max_kcal < settings.maintenance.min_kcal) {
     throw new Error("Maximum muss über Minimum liegen.");
   }
-  await saveSettings(settings);
+  data.settings = await saveCloudSettings(settings);
   showToast("Maintenance gespeichert.");
   await render();
 }
@@ -1372,7 +1357,7 @@ async function saveReminderSettings(form) {
   const settings = structuredClone(data.settings);
   settings.reminders.height_check_interval_days = optionalNonNegativeNumber(form, "height_check_interval_days", "Intervall darf nicht negativ sein.");
   settings.reminders.backup_interval_days = optionalNonNegativeNumber(form, "backup_interval_days", "Intervall darf nicht negativ sein.");
-  await saveSettings(settings);
+  data.settings = await saveCloudSettings(settings);
   showToast("Erinnerungen gespeichert.");
   await render();
 }
@@ -1394,7 +1379,7 @@ async function saveNotificationSettings(form) {
     await Notification.requestPermission();
   }
 
-  await saveSettings(settings);
+  data.settings = await saveCloudSettings(settings);
   showToast("Benachrichtigungen gespeichert.");
   await render();
 }
@@ -1421,49 +1406,12 @@ async function importData(form) {
     showToast("Nutrition-Daten zusammengeführt.");
   }
 
-  state.discardedLegacyBodyMeasurements = result?.legacyWeightEntries?.length
-    ? (result.ignoredBodyMeasurementsCount || 0)
-    : 0;
-  if (result?.legacyWeightEntries?.length) {
-    await stageLegacyWeightImport(result.legacyWeightEntries);
-    if (state.authStatus.status === "authenticated") {
-      await loadLegacyWeightMigrationCandidate();
-      showLegacyWeightMigrationDialog();
-    } else {
-      showImportLegacyDataNotice(
-        result.legacyWeightEntries.length,
-        result.ignoredWorkoutsCount,
-        result.ignoredBodyMeasurementsCount,
-      );
-    }
-  } else {
-    const ignored = [];
-    if (result?.ignoredWorkoutsCount) ignored.push(`${fmt(result.ignoredWorkoutsCount, 0)} alte Workout-Einträge`);
-    if (result?.ignoredBodyMeasurementsCount) ignored.push(`${fmt(result.ignoredBodyMeasurementsCount, 0)} Körpermessungen`);
-    if (ignored.length) showToast(`${ignored.join(" und ")} wurden nicht importiert.`);
-  }
-
+  const ignored = [];
+  if (result?.ignoredWorkoutsCount) ignored.push(`${fmt(result.ignoredWorkoutsCount, 0)} alte Workout-Einträge`);
+  if (result?.ignoredBodyMeasurementsCount) ignored.push(`${fmt(result.ignoredBodyMeasurementsCount, 0)} Körpermessungen`);
+  if (ignored.length) showToast(`${ignored.join(" und ")} wurden nicht importiert.`);
+  await refreshWeightData();
   await render();
-}
-
-function showImportLegacyDataNotice(weightCount, workoutCount, bodyMeasurementCount = 0) {
-  document.querySelector("#legacy-import-notice")?.remove();
-  const dialog = document.createElement("div");
-  dialog.id = "legacy-import-notice";
-  dialog.className = "modal-backdrop";
-  dialog.innerHTML = `
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="legacy-import-title">
-      <h2 id="legacy-import-title">Alte Backup-Daten erkannt</h2>
-      <p>${fmt(weightCount, 0)} Gewichtseinträge können nach Anmeldung zu Supabase übertragen werden.</p>
-      ${workoutCount ? `<p class="section-note">${fmt(workoutCount, 0)} alte Workout-Einträge wurden nicht importiert, da Training nicht mehr Bestandteil der Nutrition-App ist.</p>` : ""}
-      ${bodyMeasurementCount ? `<p class="section-note">${fmt(bodyMeasurementCount, 0)} alte Körpermessungen wurden gelöscht, da sie nicht mehr Teil der Nutrition-App sind.</p>` : ""}
-      <div class="button-row"><button class="btn primary" type="button" data-dialog-close>Verstanden</button></div>
-    </div>
-  `;
-  document.body.appendChild(dialog);
-  dialog.addEventListener("click", (event) => {
-    if (event.target.closest("[data-dialog-close]")) dialog.remove();
-  });
 }
 
 async function exportAndMarkBackup() {
@@ -1476,7 +1424,7 @@ async function exportAndMarkBackup() {
 async function updateReminderDate(key, rerender = true) {
   const settings = structuredClone(data.settings);
   settings.reminders[key] = toLocalIso();
-  await saveSettings(settings);
+  data.settings = await saveCloudSettings(settings);
   if (rerender) await render();
 }
 
@@ -1487,7 +1435,7 @@ async function copyYesterdayFoods() {
 
   const now = toLocalIso();
   for (const row of rows) {
-    await putItem("food_entries", {
+    await saveCloudFoodEntry({
       ...row,
       id: generateId("food"),
       date: state.selectedDate,
@@ -1496,6 +1444,7 @@ async function copyYesterdayFoods() {
     });
   }
 
+  await refreshWeightData();
   showToast("Gestern kopiert.");
   await render();
 }
@@ -1503,6 +1452,7 @@ async function copyYesterdayFoods() {
 async function confirmDelete(message, action) {
   if (!confirm(message)) return;
   await action();
+  await refreshWeightData();
   showToast("Gelöscht.");
   await render();
 }
@@ -1563,10 +1513,11 @@ async function checkDueReviews() {
   if (settings.notifications.daily_review_enabled) {
     const due = now.getHours() > 20 || (now.getHours() === 20 && now.getMinutes() >= 30);
     if (due) {
-      const lastSent = await getMeta("last_daily_review_sent_date");
-      if (lastSent?.value !== todayDateKey) {
+      const lastSent = data.review_status?.last_daily_review_sent_date;
+      if (lastSent !== todayDateKey) {
         await sendReviewNotification("daily");
-        await setMeta("last_daily_review_sent_date", todayDateKey);
+        await saveCloudMetadata("last_daily_review_sent_date", todayDateKey);
+        data.review_status.last_daily_review_sent_date = todayDateKey;
       }
     }
   }
@@ -1575,10 +1526,11 @@ async function checkDueReviews() {
     const due = now.getDay() === 0 && (now.getHours() > 18 || (now.getHours() === 18 && now.getMinutes() >= 0));
     if (due) {
       const weekKey = getIsoWeekKey(todayDateKey).key;
-      const lastSent = await getMeta("last_weekly_review_sent_week");
-      if (lastSent?.value !== weekKey) {
+      const lastSent = data.review_status?.last_weekly_review_sent_week;
+      if (lastSent !== weekKey) {
         await sendReviewNotification("weekly");
-        await setMeta("last_weekly_review_sent_week", weekKey);
+        await saveCloudMetadata("last_weekly_review_sent_week", weekKey);
+        data.review_status.last_weekly_review_sent_week = weekKey;
       }
     }
   }
@@ -1970,7 +1922,7 @@ function renderWeightHistory() {
   const entries = [...data.weight_entries].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   if (!entries.length) {
     if (state.weightLoading) return `<div class="empty">Gewichtsdaten werden geladen …</div>`;
-    if (state.weightError) return `<div class="empty">Gewichtsdaten konnten nicht mit Supabase verbunden werden. Dein Kalorientracking funktioniert weiterhin lokal.</div>`;
+    if (state.weightError) return `<div class="empty">Gewichtsdaten konnten nicht mit Supabase verbunden werden.</div>`;
     return `<div class="empty">Noch keine Cloud-Gewichtseinträge.</div>`;
   }
 
@@ -2615,9 +2567,10 @@ async function saveImportedFood(form) {
     preset_id: null,
   });
 
-  await putItem("food_entries", entry);
+  await saveCloudFoodEntry(entry);
   importedEntry = null;
   state.caloriePanel = "quick";
+  await refreshWeightData();
   showToast("Eintrag importiert.");
   await render();
 }

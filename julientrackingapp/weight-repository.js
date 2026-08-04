@@ -9,10 +9,12 @@ const SOURCE_PRIORITY = {
 };
 
 export async function getWeightMeasurements(options = {}) {
+  const user = await requireUser();
   const client = await getSupabaseClient();
   let query = client
     .from(TABLE)
     .select("id, user_id, measured_at, weight_kg, source, external_id, source_package, source_modified_at, created_at, updated_at")
+    .eq("user_id", user.id)
     .order("measured_at", { ascending: true });
 
   if (options.from) query = query.gte("measured_at", options.from);
@@ -154,6 +156,56 @@ export async function exportCloudWeights() {
   return getWeightMeasurements();
 }
 
+// Imports weights from a schema-v4 backup without trusting the exporting account's
+// user_id. Existing rows from the same account are recognised by their original
+// UUID; imported rows from another account receive a stable backup external_id so
+// importing the same backup twice never creates duplicates.
+export async function importBackupWeightMeasurements(measurements) {
+  const user = await requireUser();
+  const rows = (measurements || [])
+    .map((measurement) => normalizeBackupWeightMeasurement(measurement))
+    .filter(Boolean);
+  if (!rows.length) return { importedCount: 0, skippedCount: 0, total: 0 };
+
+  const client = await getSupabaseClient();
+  let importedCount = 0;
+  let skippedCount = 0;
+
+  for (let start = 0; start < rows.length; start += 100) {
+    const chunk = rows.slice(start, start + 100);
+    const originalIds = chunk.map((row) => row.original_id).filter(Boolean);
+    const backupExternalIds = chunk.map((row) => row.external_id);
+
+    const [{ data: matchingIds, error: idError }, { data: matchingBackups, error: backupError }] = await Promise.all([
+      originalIds.length
+        ? client.from(TABLE).select("id").eq("user_id", user.id).in("id", originalIds)
+        : Promise.resolve({ data: [], error: null }),
+      client
+        .from(TABLE)
+        .select("external_id")
+        .eq("user_id", user.id)
+        .eq("source_package", "fittrack_backup_v4")
+        .in("external_id", backupExternalIds),
+    ]);
+    if (idError) throw new Error(idError.message || "Bestehende Gewichtsdaten konnten nicht geprüft werden.");
+    if (backupError) throw new Error(backupError.message || "Bestehende Backup-Gewichte konnten nicht geprüft werden.");
+
+    const existingIds = new Set((matchingIds || []).map((row) => row.id));
+    const existingBackupIds = new Set((matchingBackups || []).map((row) => row.external_id));
+    const missingRows = chunk
+      .filter((row) => !existingIds.has(row.original_id) && !existingBackupIds.has(row.external_id))
+      .map(({ original_id, ...row }) => ({ ...row, user_id: user.id }));
+    skippedCount += chunk.length - missingRows.length;
+    if (!missingRows.length) continue;
+
+    const { error: insertError } = await client.from(TABLE).insert(missingRows);
+    if (insertError) throw new Error(insertError.message || "Gewichtsdaten aus dem Backup konnten nicht importiert werden.");
+    importedCount += missingRows.length;
+  }
+
+  return { importedCount, skippedCount, total: rows.length };
+}
+
 function compareDailyCandidates(a, b) {
   const priorityA = SOURCE_PRIORITY[a.source] ?? 3;
   const priorityB = SOURCE_PRIORITY[b.source] ?? 3;
@@ -201,6 +253,31 @@ function validWeight(value) {
 function validWeightOrNull(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function normalizeBackupWeightMeasurement(measurement) {
+  if (!measurement || typeof measurement !== "object") return null;
+  const weight = validWeightOrNull(measurement.weight_kg);
+  const measuredAt = String(measurement.measured_at || "");
+  if (!weight || Number.isNaN(new Date(measuredAt).getTime())) return null;
+
+  const source = ["manual_nutrition", "manual_fitness", "health_connect", "legacy_import"].includes(measurement.source)
+    ? measurement.source
+    : "legacy_import";
+  const originalId = String(measurement.id || "");
+  if (!originalId) return null;
+
+  return {
+    original_id: originalId,
+    measured_at: measuredAt,
+    weight_kg: weight,
+    source,
+    // Do not reuse a Health/Fitness external id in another account. The backup
+    // identifier is deliberately scoped by source_package and the original UUID.
+    external_id: `fittrack-backup:${originalId}`,
+    source_package: "fittrack_backup_v4",
+    source_modified_at: measurement.source_modified_at || measurement.updated_at || measurement.created_at || null,
+  };
 }
 
 async function requireUser() {

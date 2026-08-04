@@ -14,7 +14,7 @@ export async function initializeAuth(onChange) {
       user: null,
       error: "Die Cloud-Verbindung ist noch nicht eingerichtet.",
     };
-    onChange?.(authState);
+    await onChange?.(authState, { type: "initial" });
     return authState;
   }
 
@@ -24,12 +24,15 @@ export async function initializeAuth(onChange) {
     if (error) throw error;
 
     authState = stateFromSession(data.session);
-    onChange?.(authState);
+    await onChange?.(authState, { type: "initial" });
 
     if (!authSubscription) {
-      const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
+      const { data: listener } = client.auth.onAuthStateChange((event, session) => {
         authState = stateFromSession(session);
-        onChange?.(authState);
+        Promise.resolve(onChange?.(authState, { type: event })).catch(() => {
+          // The consumer presents cloud errors in the app UI; an auth listener
+          // must never create an unhandled rejected promise.
+        });
       });
       authSubscription = listener.subscription;
     }
@@ -39,7 +42,7 @@ export async function initializeAuth(onChange) {
       user: null,
       error: authErrorMessage(error),
     };
-    onChange?.(authState);
+    await onChange?.(authState, { type: "initial" });
   }
 
   return authState;
@@ -75,7 +78,14 @@ export async function getCurrentUser() {
 
 export async function testCloudConnection() {
   const client = await getSupabaseClient();
-  const { error } = await client.from("weight_measurements").select("id", { head: true, count: "exact" }).limit(1);
+  const results = await Promise.all([
+    client.from("weight_measurements").select("id", { head: true, count: "exact" }).limit(1),
+    client.from("app_settings").select("user_id", { head: true, count: "exact" }).limit(1),
+    client.from("food_entries").select("id", { head: true, count: "exact" }).limit(1),
+    client.from("food_presets").select("id", { head: true, count: "exact" }).limit(1),
+    client.from("app_metadata").select("key", { head: true, count: "exact" }).limit(1),
+  ]);
+  const error = results.find((result) => result.error)?.error;
   if (error) throw new Error(authErrorMessage(error));
   return true;
 }

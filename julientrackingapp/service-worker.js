@@ -1,4 +1,4 @@
-const APP_VERSION = "2026-08-03-chatgpt-weight-sync-v7";
+const APP_VERSION = "2026-08-04-supabase-full-data-v1";
 const APP_CACHE = `fittrack-app-shell-${APP_VERSION}`;
 const APP_CACHE_PREFIX = "fittrack-app-shell-";
 
@@ -13,6 +13,7 @@ const CORE_ASSETS = [
   "./supabase-client.js",
   "./auth-service.js",
   "./weight-repository.js",
+  "./cloud-repository.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",

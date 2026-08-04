@@ -1,44 +1,32 @@
+import { createDataSnapshot, todayKey, toLocalIso } from "./db.js";
 import {
-  createDataSnapshot,
-  getAll,
-  getItem,
-  getSettings,
-  putItem,
-  replaceStore,
-  saveSettings,
-  todayKey,
-  toLocalIso,
-} from "./db.js";
+  buildCloudExportData,
+  mergeCloudImportData,
+  replaceCloudNutritionData,
+} from "./cloud-repository.js";
 
-const SCHEMA_VERSION = 3;
-const ACTIVE_DATA_STORES = ["food_entries", "food_presets"];
-const PRESET_STORES = ["food_presets"];
+const SCHEMA_VERSION = 4;
 
 export async function buildExportObject() {
-  const settings = cleanSettingsForExport(await getSettings());
-  const data = {
+  const cloudData = await buildCloudExportData();
+  return {
     schema_version: SCHEMA_VERSION,
     exported_at: toLocalIso(),
     app: {
       name: "FitTrack Nutrition",
-      version: "3.0.0",
+      version: "4.0.0",
     },
-    settings,
-    remote_resources: {
-      weight_measurements: "supabase",
-    },
+    settings: cleanSettingsForExport(cloudData.settings),
+    food_entries: cloudData.food_entries,
+    food_presets: cloudData.food_presets,
+    weight_measurements: cloudData.weight_measurements,
+    review_status: cloudData.review_status,
   };
-
-  data.food_entries = await getAll("food_entries");
-  data.food_presets = await getAll("food_presets");
-
-  return data;
 }
 
 export async function downloadFullExport() {
   const data = await buildExportObject();
-  const filename = `fittrack-backup-${todayKey()}.json`;
-  downloadJson(data, filename);
+  downloadJson(data, `fittrack-backup-${todayKey()}.json`);
   return data;
 }
 
@@ -57,88 +45,67 @@ export function downloadJson(data, filename) {
 }
 
 export async function readJsonFile(file) {
-  const text = await file.text();
-  return JSON.parse(text);
+  return JSON.parse(await file.text());
 }
 
 export function validateImportData(data) {
-  if (!data || typeof data !== "object") {
-    throw new Error("Import-Datei ungültig.");
-  }
-
+  if (!data || typeof data !== "object") throw new Error("Import-Datei ungültig.");
   const version = Number(data.schema_version);
-  if (![1, 2, 3].includes(version) && !looksLikeLegacyImport(data)) {
+  if (![1, 2, 3, 4].includes(version) && !looksLikeLegacyImport(data)) {
     throw new Error("Schema-Version nicht unterstützt.");
   }
-
   return true;
 }
 
 export async function replaceAllData(data) {
   const normalized = normalizeImportData(data);
-  await createDataSnapshot("before-import-replace", await buildExportObject());
-
-  await saveSettings(normalized.settings || {});
-  const counts = {};
-
-  for (const storeName of ACTIVE_DATA_STORES) {
-    const rows = normalized[storeName] || [];
-    await replaceStore(storeName, rows);
-    counts[storeName] = rows.length;
-  }
-  return importResult(counts, normalized);
+  await createDataSnapshot("before-cloud-import-replace", await buildExportObject());
+  return replaceCloudNutritionData(normalized);
 }
 
 export async function mergeImportData(data, options = {}) {
-  const normalized = normalizeImportData(data);
-  const stores = options.presetsOnly ? PRESET_STORES : ACTIVE_DATA_STORES;
-  const counts = Object.fromEntries(stores.map((store) => [store, 0]));
+  return mergeCloudImportData(normalizeImportData(data), options);
+}
 
-  if (!options.presetsOnly && normalized.settings) {
-    await saveSettings(normalized.settings);
-  }
-
-  for (const storeName of stores) {
-    const rows = normalized[storeName] || [];
-    for (const row of rows) {
-      if (!row?.id) continue;
-      const existing = await getItem(storeName, row.id);
-      if (!existing || isNewer(row, existing)) {
-        await putItem(storeName, row);
-        counts[storeName] += 1;
-      }
-    }
-  }
-
-  return importResult(counts, normalized);
+// Used only for the explicit first-login transfer. It uses the same normalizer
+// as a JSON import, so old local data and old backup files behave identically.
+export async function migrateLocalDataToCloud(payload) {
+  return mergeCloudImportData(normalizeImportData({
+    schema_version: 3,
+    settings: payload.settings || {},
+    food_entries: payload.food_entries || [],
+    food_presets: payload.food_presets || [],
+    weight_entries: payload.weight_entries || [],
+    review_status: payload.review_status || {},
+  }));
 }
 
 function normalizeImportData(data) {
   validateImportData(data);
   const version = Number(data.schema_version);
-
   return {
     schema_version: SCHEMA_VERSION,
     settings: cleanSettingsForExport(data.settings || {}),
     food_entries: asArray(data.food_entries),
     food_presets: asArray(data.food_presets),
-    legacy_weight_entries: extractLegacyWeightEntries(data),
+    review_status: asObject(data.review_status),
+    cloud_weight_measurements: version >= 4 ? extractCloudWeightMeasurements(data) : [],
+    legacy_weight_entries: extractLegacyWeightEntries(data, version),
     ignored_workouts_count: version < 3 || looksLikeLegacyImport(data) ? asArray(data.workouts).length : 0,
     ignored_body_measurements_count: countLegacyBodyMeasurements(data),
   };
 }
 
-function importResult(counts, normalized) {
-  return {
-    counts,
-    legacyWeightEntries: normalized.legacy_weight_entries,
-    ignoredWorkoutsCount: normalized.ignored_workouts_count,
-    ignoredBodyMeasurementsCount: normalized.ignored_body_measurements_count,
-  };
+function extractCloudWeightMeasurements(data) {
+  return asArray(data.weight_measurements)
+    .filter((entry) => entry && typeof entry === "object" && entry.id)
+    .map(({ user_id, ...entry }) => entry);
 }
 
-function extractLegacyWeightEntries(data) {
-  const fields = ["weight_entries", "weight_measurements", "weights", "weightMeasurements"];
+function extractLegacyWeightEntries(data, version) {
+  const fields = version >= 4
+    ? ["weight_entries", "weights", "weightMeasurements"]
+    : ["weight_entries", "weight_measurements", "weights", "weightMeasurements"];
   const normalized = [];
 
   for (const field of fields) {
@@ -148,9 +115,7 @@ function extractLegacyWeightEntries(data) {
     }
   }
 
-  const byId = new Map();
-  for (const row of normalized) byId.set(row.id, row);
-  return [...byId.values()];
+  return [...new Map(normalized.map((row) => [row.id, row])).values()];
 }
 
 function normalizeLegacyWeightEntry(entry, field, index) {
@@ -182,18 +147,8 @@ function countLegacyBodyMeasurements(data) {
 
 function looksLikeLegacyImport(data) {
   return [
-    "settings",
-    "weight_entries",
-    "weight_measurements",
-    "weights",
-    "weightMeasurements",
-    "food_entries",
-    "food_presets",
-    "workouts",
-    "body_measurements",
-    "bodyMeasurements",
-    "body_measurement_entries",
-    "circumference_entries",
+    "settings", "weight_entries", "weight_measurements", "weights", "weightMeasurements", "food_entries", "food_presets",
+    "workouts", "body_measurements", "bodyMeasurements", "body_measurement_entries", "circumference_entries",
   ].some((key) => key in data);
 }
 
@@ -201,6 +156,7 @@ function cleanSettingsForExport(settings) {
   const source = settings || {};
   const goals = source.goals || {};
   const preferences = source.preferences || {};
+  const notifications = source.notifications || {};
   const cleanGoals = {
     ...goals,
     carbs_goal_g: emptyToNull(goals.carbs_goal_g),
@@ -210,10 +166,8 @@ function cleanSettingsForExport(settings) {
   delete cleanGoals.strength_goal_per_week;
   delete cleanGoals.cardio_goal_per_week;
 
-  const notifications = source.notifications || {};
   const focus = { ...(notifications.focus || {}) };
   delete focus.training;
-
   return {
     ...source,
     goals: cleanGoals,
@@ -221,10 +175,7 @@ function cleanSettingsForExport(settings) {
       ...preferences,
       theme: ["system", "light", "dark"].includes(preferences.theme) ? preferences.theme : "system",
     },
-    notifications: {
-      ...notifications,
-      focus,
-    },
+    notifications: { ...notifications, focus },
   };
 }
 
@@ -236,8 +187,6 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function isNewer(incoming, existing) {
-  const incomingDate = incoming.updated_at || incoming.created_at || "";
-  const existingDate = existing.updated_at || existing.created_at || "";
-  return incomingDate >= existingDate;
+function asObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
