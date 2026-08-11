@@ -2,6 +2,11 @@ import { mergeSettings } from "./db.js";
 import { getAuthState, getCurrentUser } from "./auth-service.js";
 import { getSupabaseClient } from "./supabase-client.js";
 import {
+  isJwtIssuedAtFutureError,
+  toCloudError,
+  withJwtIssuedAtFutureRetry,
+} from "./supabase-retry.js";
+import {
   exportCloudWeights,
   getDailyWeightSeries,
   importBackupWeightMeasurements,
@@ -15,6 +20,18 @@ const METADATA_TABLE = "app_metadata";
 const REVIEW_KEYS = ["last_daily_review_sent_date", "last_weekly_review_sent_week"];
 
 export async function loadCloudSnapshot() {
+  try {
+    return await withJwtIssuedAtFutureRetry(loadCloudSnapshotOnce);
+  } catch (error) {
+    if (!isJwtIssuedAtFutureError(error)) throw error;
+    throw new Error(
+      "Temporäre Zeitabweichung bei Supabase. Bitte Cloud-Daten erneut laden.",
+      { cause: error },
+    );
+  }
+}
+
+async function loadCloudSnapshotOnce() {
   const user = await requireUser();
   const client = await getSupabaseClient();
   const [settingsResult, foodResult, presetResult, metadataResult, weightEntries] = await Promise.all([
@@ -316,5 +333,5 @@ async function requireUser() {
 }
 
 function throwIfError(error, fallback) {
-  if (error) throw new Error(error.message || fallback);
+  if (error) throw toCloudError(error, fallback);
 }

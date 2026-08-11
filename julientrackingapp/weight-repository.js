@@ -1,5 +1,6 @@
 import { getCurrentUser, getAuthState } from "./auth-service.js";
 import { getSupabaseClient } from "./supabase-client.js";
+import { toCloudError } from "./supabase-retry.js";
 
 const TABLE = "weight_measurements";
 const SOURCE_PRIORITY = {
@@ -21,7 +22,7 @@ export async function getWeightMeasurements(options = {}) {
   if (options.to) query = query.lte("measured_at", options.to);
 
   const { data, error } = await query;
-  if (error) throw new Error(error.message || "Gewichtsdaten konnten nicht geladen werden.");
+  if (error) throw toCloudError(error, "Gewichtsdaten konnten nicht geladen werden.");
   return data || [];
 }
 

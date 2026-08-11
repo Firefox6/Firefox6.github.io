@@ -1,6 +1,6 @@
 # AGENTS.md – Projektzentrale für FitTrack Nutrition
 
-Stand: 4. August 2026
+Stand: 11. August 2026
 
 Diese Datei beschreibt den aktuellen Codezustand. Vor grösseren Änderungen zuerst diese Datei und danach die konkret betroffenen Quelldateien lesen. Bei Abweichungen gilt immer der Code; die Dokumentation anschliessend mit aktualisieren.
 
@@ -14,7 +14,7 @@ FitTrack Nutrition ist eine persönliche, deutschsprachige PWA zur Erfassung von
 - Die aktive App umfasst Dashboard, Gewicht, Kalorien und Mehr. Es gibt keine aktive Trainings-, Körperumfangs- oder KFA-Funktion mehr.
 - Die Oberfläche ist Deutsch (de-CH), metrisch, responsiv und als installierbare PWA ausgelegt.
 - Das Frontend besteht aus statischem HTML, CSS und ES-Modulen ohne Bundler oder Build-Schritt.
-- package.json enthält nur den Skript-Eintrag npm test mit Node Test Runner. Aktuell gibt es keine Testdateien.
+- package.json enthält nur den Skript-Eintrag npm test mit Node Test Runner. supabase-retry.test.js prüft den begrenzten Retry für den transienten PostgREST-Fehler PGRST303.
 
 Die App-Shell ist lokal und cachebar, benötigt für die produktive Nutzung aber Internetzugriff auf Supabase. Barcode-Suche, Kamera-Fallback und QR-Erzeugung verwenden zusätzlich externe Dienste beziehungsweise CDN-Skripte.
 
@@ -25,7 +25,8 @@ Die App-Shell ist lokal und cachebar, benötigt für die produktive Nutzung aber
 - styles.css: Komplettes responsives Styling, Design-Tokens für hell/dunkel, App-Shell, Formulare, Cards, Overlays und Breakpoints.
 - calculations.js: DOM-freie Berechnungen für Ernährung, Gewicht, Kalorienpool, BMI und Auto-TDEE.
 - db.js: IndexedDB Version 3, Default-Einstellungen, lokale Snapshots und Legacy-Migrationen. Kein aktives primäres Nutrition-Repository.
-- supabase-client.js: Öffentliche Supabase-URL und Publishable Key; lädt supabase-js dynamisch von JSDelivr und verwaltet den Singleton-Client.
+- supabase-client.js: Öffentliche Supabase-URL und Publishable Key; lädt die festgeschriebene supabase-js-Version dynamisch von JSDelivr und verwaltet den Singleton-Client.
+- supabase-retry.js: DOM-freie Erkennung und begrenzter Retry für den transienten PostgREST-Fehler PGRST303 / JWT issued at future.
 - auth-service.js: Session-Initialisierung, Auth-State, E-Mail/Passwort-Anmeldung, Abmeldung und Verbindungstest.
 - cloud-repository.js: Cloud-Repository für Einstellungen, Kalorieneinträge, Presets, Review-Metadaten sowie Import/Export-Orchestrierung.
 - weight-repository.js: Gemeinsames Cloud-Gewichtsrepository mit Quellenpriorität, manueller Nutrition-Erfassung und Importmigrationen.
@@ -34,6 +35,7 @@ Die App-Shell ist lokal und cachebar, benötigt für die produktive Nutzung aber
 - manifest.webmanifest: PWA-Metadaten, fünf Icons und Shortcuts für Barcode, Gewicht und Schnelleintrag.
 - service-worker.js: Versionierter App-Shell-Cache, Offline-Fallback und Update-Aktivierung.
 - icons/: Die echten PWA-Icons. Im Manifest und Service Worker immer die Pfade icons/... verwenden.
+- widgets/android/: Eigenständige native Android-Widget-App mit einem 5×1-Tagesziel- und einem 2×2-Kalorien-Widget. Sie verwendet eine separate Supabase-Session, Android Keystore und die bestehenden RLS-geschützten Tabellen; sie gehört nicht zum PWA-Service-Worker-Cache.
 
 Die fünf verwendeten Icon-Dateien sind:
 
@@ -82,7 +84,7 @@ Der zentrale In-Memory-Snapshot hat die Form:
       review_status
     }
 
-Bei authentifiziertem Zustand lädt loadCloudSnapshot() Einstellungen, Food-Einträge, Presets, Review-Metadaten und die auf Tageswerte reduzierte Gewichtshistorie. Speichern, Löschen und Importe schreiben direkt in die Cloud; anschliessend ruft die UI refreshWeightData() und render() auf.
+Bei authentifiziertem Zustand lädt loadCloudSnapshot() Einstellungen, Food-Einträge, Presets, Review-Metadaten und die auf Tageswerte reduzierte Gewichtshistorie. Meldet PostgREST dabei PGRST303 beziehungsweise JWT issued at future, wiederholt ausschliesslich dieser read-only Snapshot dieselbe Abfrage nach 1,5 und nötigenfalls 3 Sekunden mit derselben Session. Es wird kein zusätzliches Token erzeugt. Speichern, Löschen und Importe werden nie automatisch wiederholt; sie schreiben direkt in die Cloud, anschliessend ruft die UI refreshWeightData() und render() auf.
 
 Ohne Anmeldung zeigt die App nur den Cloud-Anmeldezustand. Es gibt keinen produktiv nutzbaren lokalen Offline-Modus mehr.
 
@@ -242,7 +244,7 @@ Gewichte aus älteren Backups erhalten beim Import stabile externe IDs. Dadurch 
 
 ## PWA und Service Worker
 
-service-worker.js definiert APP_VERSION = 2026-08-04-dashboard-bmi-v10. Der Cache enthält alle lokalen Module, die Shell, Manifest und fünf Icons.
+service-worker.js definiert APP_VERSION = 2026-08-11-supabase-jwt-retry-v2. Der Cache enthält alle lokalen Module, die Shell, Manifest und fünf Icons.
 
 - Navigation: network-first mit Cache-/index.html-Fallback.
 - Andere Same-Origin-GET-Requests: cache-first.

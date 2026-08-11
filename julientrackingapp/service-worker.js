@@ -1,4 +1,4 @@
-const APP_VERSION = "2026-08-04-redesign-v1";
+const APP_VERSION = "2026-08-11-supabase-jwt-retry-v2";
 const APP_CACHE = `fittrack-app-shell-${APP_VERSION}`;
 const APP_CACHE_PREFIX = "fittrack-app-shell-";
 
@@ -11,6 +11,7 @@ const CORE_ASSETS = [
   "./calculations.js",
   "./export-import.js",
   "./supabase-client.js",
+  "./supabase-retry.js",
   "./auth-service.js",
   "./weight-repository.js",
   "./cloud-repository.js",
