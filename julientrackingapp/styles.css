@@ -470,6 +470,24 @@ form .button-row, form > .btn, form > button { margin-top: 14px; }
 
 [hidden], .hidden { display: none !important; }
 
+.legal-page {
+  width: min(760px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 40px 0 64px;
+}
+
+.legal-page > h1 {
+  margin: 4px 0 16px;
+}
+
+.legal-page .card {
+  margin: 24px 0;
+}
+
+.legal-page li + li {
+  margin-top: 8px;
+}
+
 @media (min-width: 860px) {
   .screen { padding: 26px 22px 36px; }
   .dashboard-layout { grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr); }

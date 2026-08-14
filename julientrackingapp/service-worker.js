@@ -1,10 +1,11 @@
-const APP_VERSION = "2026-08-11-supabase-jwt-retry-v2";
+const APP_VERSION = "2026-08-14-google-health-sync-v2";
 const APP_CACHE = `fittrack-app-shell-${APP_VERSION}`;
 const APP_CACHE_PREFIX = "fittrack-app-shell-";
 
 const CORE_ASSETS = [
   "./",
   "./index.html",
+  "./privacy.html",
   "./styles.css",
   "./app.js",
   "./db.js",
@@ -15,6 +16,7 @@ const CORE_ASSETS = [
   "./auth-service.js",
   "./weight-repository.js",
   "./cloud-repository.js",
+  "./google-health-service.js",
   "./share-payload.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",

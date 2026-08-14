@@ -1,6 +1,7 @@
 import { mergeSettings } from "./db.js";
 import { getAuthState, getCurrentUser } from "./auth-service.js";
 import { getSupabaseClient } from "./supabase-client.js";
+import { queueGoogleHealthSync } from "./google-health-service.js";
 import {
   isJwtIssuedAtFutureError,
   toCloudError,
@@ -66,15 +67,20 @@ export async function saveCloudSettings(settings) {
     .select("settings")
     .single();
   throwIfError(error, "Einstellungen konnten nicht gespeichert werden.");
+  queueGoogleHealthSync();
   return mergeSettings(data?.settings || cleaned);
 }
 
 export async function saveCloudFoodEntry(entry) {
-  return upsertRecord(FOOD_ENTRIES_TABLE, serializeFoodEntry(entry), "Kalorieneintrag konnte nicht gespeichert werden.");
+  const saved = await upsertRecord(FOOD_ENTRIES_TABLE, serializeFoodEntry(entry), "Kalorieneintrag konnte nicht gespeichert werden.");
+  queueGoogleHealthSync();
+  return saved;
 }
 
 export async function deleteCloudFoodEntry(id) {
-  return deleteRecord(FOOD_ENTRIES_TABLE, id, "Kalorieneintrag konnte nicht gelöscht werden.");
+  const deleted = await deleteRecord(FOOD_ENTRIES_TABLE, id, "Kalorieneintrag konnte nicht gelöscht werden.");
+  queueGoogleHealthSync();
+  return deleted;
 }
 
 export async function saveCloudFoodPreset(preset) {
@@ -125,6 +131,7 @@ export async function mergeCloudImportData(normalized, options = {}) {
     skippedWeightCount = legacy.skippedCount + cloud.skippedCount;
   }
 
+  if (!presetsOnly) queueGoogleHealthSync();
   return {
     counts,
     legacyWeightEntries: normalized.legacy_weight_entries || [],
@@ -155,6 +162,7 @@ export async function replaceCloudNutritionData(normalized) {
   const legacy = await migrateLegacyWeightEntries(normalized.legacy_weight_entries || []);
   const cloud = await importBackupWeightMeasurements(normalized.cloud_weight_measurements || []);
 
+  queueGoogleHealthSync();
   return {
     counts: {
       food_entries: foodCount,

@@ -1,6 +1,7 @@
 import { getCurrentUser, getAuthState } from "./auth-service.js";
 import { getSupabaseClient } from "./supabase-client.js";
 import { toCloudError } from "./supabase-retry.js";
+import { queueGoogleHealthSync } from "./google-health-service.js";
 
 const TABLE = "weight_measurements";
 const SOURCE_PRIORITY = {
@@ -42,6 +43,7 @@ export async function createManualWeightMeasurement(input) {
     .select()
     .single();
   if (error) throw new Error(error.message || "Gewicht konnte nicht gespeichert werden.");
+  queueGoogleHealthSync();
   return data;
 }
 
@@ -59,6 +61,7 @@ export async function updateManualWeightMeasurement(id, input) {
     .maybeSingle();
   if (error) throw new Error(error.message || "Gewicht konnte nicht aktualisiert werden.");
   if (!data) throw new Error("Nur eigene Nutrition-Gewichte können bearbeitet werden.");
+  queueGoogleHealthSync();
   return data;
 }
 
@@ -74,6 +77,7 @@ export async function deleteManualWeightMeasurement(id) {
     .maybeSingle();
   if (error) throw new Error(error.message || "Gewicht konnte nicht gelöscht werden.");
   if (!data) throw new Error("Nur eigene Nutrition-Gewichte können gelöscht werden.");
+  queueGoogleHealthSync();
 }
 
 export async function getDailyWeightSeries(options = {}) {
@@ -150,6 +154,7 @@ export async function migrateLegacyWeightEntries(entries) {
     migratedCount += missingRows.length;
   }
 
+  if (migratedCount > 0) queueGoogleHealthSync();
   return { migratedCount, skippedCount, total: rows.length };
 }
 
@@ -204,6 +209,7 @@ export async function importBackupWeightMeasurements(measurements) {
     importedCount += missingRows.length;
   }
 
+  if (importedCount > 0) queueGoogleHealthSync();
   return { importedCount, skippedCount, total: rows.length };
 }
 

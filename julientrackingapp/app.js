@@ -65,6 +65,14 @@ import {
 } from "./cloud-repository.js";
 import { isSupabaseConfigured } from "./supabase-client.js";
 import { createSharedFoodPayload, parseSharedFoodPayload } from "./share-payload.js";
+import {
+  consumeGoogleHealthReturnStatus,
+  disconnectGoogleHealth,
+  emptyGoogleHealthStatus,
+  getGoogleHealthStatus,
+  startGoogleHealthConnection,
+  syncGoogleHealthNow,
+} from "./google-health-service.js";
 
 const app = document.querySelector("#app");
 const screenTitle = document.querySelector("#screen-title");
@@ -104,6 +112,9 @@ const state = {
   weightError: null,
   lastWeightSyncAt: null,
   localMigration: null,
+  googleHealth: emptyGoogleHealthStatus(),
+  googleHealthLoading: false,
+  googleHealthError: null,
 };
 
 let data = {
@@ -133,6 +144,7 @@ const IMPORT_DRAFT_STORAGE_KEY = "fittrack_pending_json_import_v1";
 init();
 
 async function init() {
+  const googleHealthReturnStatus = consumeGoogleHealthReturnStatus();
   bindEvents();
   restorePendingImportDraft();
   const launchAction = applyLaunchAction();
@@ -143,6 +155,16 @@ async function init() {
   await initializeCloud();
   await render();
   registerServiceWorker();
+
+  if (googleHealthReturnStatus) {
+    const messages = {
+      connected: "Google Health wurde verbunden. Der Erstabgleich läuft.",
+      denied: "Google-Health-Verbindung wurde abgebrochen.",
+      "partial-consent": "Für die Synchronisierung müssen beide Schreibberechtigungen freigegeben werden.",
+      error: "Google Health konnte nicht verbunden werden.",
+    };
+    showToast(messages[googleHealthReturnStatus] || "Google-Health-Status aktualisiert.");
+  }
 
   if (launchAction === "barcode") {
     await openBarcodeOverlay();
@@ -175,11 +197,15 @@ function applyLaunchAction() {
 }
 
 function bindEvents() {
-  document.querySelector(".bottom-nav").addEventListener("click", (event) => {
+  document.querySelector(".bottom-nav").addEventListener("click", async (event) => {
     const button = event.target.closest("[data-tab]");
     if (!button) return;
     state.tab = button.dataset.tab;
-    render();
+    if (state.tab === "more" && state.authStatus.status === "authenticated") {
+      await refreshGoogleHealthStatus({ renderAfter: true });
+    } else {
+      await render();
+    }
   });
 
   document.addEventListener("click", async (event) => {
@@ -188,6 +214,7 @@ function bindEvents() {
     if (button.dataset.globalAction === "sync-render") {
       if (state.authStatus.status === "authenticated") {
         await refreshWeightData({ renderAfter: true });
+        await refreshGoogleHealthStatus({ renderAfter: state.tab === "more" });
         showToast(state.weightError || "Cloud-Daten aktualisiert.");
       } else {
         await render();
@@ -238,6 +265,7 @@ async function initializeCloud() {
     state.authStatus = nextStatus;
     if (nextStatus.status === "authenticated") {
       await refreshWeightData({ renderAfter: true });
+      await refreshGoogleHealthStatus({ renderAfter: state.tab === "more" });
       await loadLocalMigrationCandidate();
       if (!state.localMigration?.transferComplete) showLocalMigrationDialog();
     } else {
@@ -246,12 +274,37 @@ async function initializeCloud() {
       state.weightLoading = false;
       state.lastWeightSyncAt = null;
       state.localMigration = null;
+      state.googleHealth = emptyGoogleHealthStatus();
+      state.googleHealthLoading = false;
+      state.googleHealthError = null;
       await render();
     }
     if (event.type === "initial") initialAuthHandled = true;
   });
 
   if (!initialAuthHandled) await render();
+}
+
+async function refreshGoogleHealthStatus({ renderAfter = false } = {}) {
+  if (state.authStatus.status !== "authenticated") {
+    state.googleHealth = emptyGoogleHealthStatus();
+    state.googleHealthLoading = false;
+    state.googleHealthError = null;
+    if (renderAfter) await render();
+    return;
+  }
+
+  state.googleHealthLoading = true;
+  state.googleHealthError = null;
+  if (renderAfter) await render();
+  try {
+    state.googleHealth = await getGoogleHealthStatus();
+  } catch (error) {
+    state.googleHealthError = error.message || "Google-Health-Status konnte nicht geladen werden.";
+  } finally {
+    state.googleHealthLoading = false;
+  }
+  if (renderAfter) await render();
 }
 
 async function refreshWeightData({ renderAfter = false } = {}) {
@@ -616,6 +669,8 @@ function renderMoreV2() {
 
     ${renderCloudAccount()}
 
+    ${renderGoogleHealth()}
+
     <section class="card">
       <h2>Darstellung</h2>
       <form id="settings-preferences-form">
@@ -798,6 +853,54 @@ function renderCloudAccount() {
           <button class="btn primary" type="submit" ${isConfigured ? "" : "disabled"}>Anmelden</button>
         </form>
       `}
+    </section>
+  `;
+}
+
+function renderGoogleHealth() {
+  const health = state.googleHealth || emptyGoogleHealthStatus();
+  const connected = health.connected === true;
+  const needsReconnect = health.status === "reauth_required";
+  const statusLabel = !connected
+    ? "Nicht verbunden"
+    : needsReconnect
+      ? "Erneut anmelden"
+      : "Verbunden";
+  const busy = state.googleHealthLoading;
+
+  return `
+    <section class="card google-health-card">
+      <div class="section-head">
+        <div>
+          <h2>Google Health</h2>
+          <p class="section-note">Einweg-Synchronisierung: FitTrack schreibt Ernährung, eigene Gewichte und Grösse. Es werden keine Google-Health-Daten gelesen.</p>
+        </div>
+        <span class="pill ${connected && !needsReconnect ? "ok" : needsReconnect ? "warn" : ""}">${safe(statusLabel)}</span>
+      </div>
+
+      ${connected ? `
+        <div class="grid auto">
+          ${renderMetric("Synchronisiert", fmt(health.synced || 0, 0), health.initial_total ? `von ${fmt(health.initial_total, 0)} beim Erstabgleich` : "Google-Datenpunkte")}
+          ${renderMetric("Offen", fmt((health.pending || 0) + (health.processing || 0), 0), health.processing ? `${fmt(health.processing, 0)} in Arbeit` : "Outbox")}
+          ${renderMetric("Fehlgeschlagen", fmt(health.failed || 0, 0), "nach Wiederholungen")}
+          ${renderMetric("Letzter Erfolg", health.last_success_at ? formatDateTime(health.last_success_at) : "–", health.timezone || "Europe/Zurich")}
+        </div>
+        ${health.last_error ? `<p class="inline-notice warn">${safe(health.last_error)}</p>` : ""}
+        <div class="button-row" style="margin-top: 14px;">
+          ${needsReconnect
+            ? `<button class="btn primary" type="button" data-action="connect-google-health" ${busy ? "disabled" : ""}>Erneut verbinden</button>`
+            : `<button class="btn primary" type="button" data-action="sync-google-health" ${busy ? "disabled" : ""}>${busy ? "Synchronisiere …" : "Jetzt synchronisieren"}</button>`}
+          ${health.failed ? `<button class="btn ghost" type="button" data-action="retry-google-health" ${busy ? "disabled" : ""}>Fehler erneut versuchen</button>` : ""}
+          <button class="btn ghost" type="button" data-action="disconnect-google-health" ${busy ? "disabled" : ""}>Nur Verbindung trennen</button>
+          <button class="btn danger" type="button" data-action="delete-disconnect-google-health" ${busy ? "disabled" : ""}>Google-Daten löschen &amp; trennen</button>
+        </div>
+      ` : `
+        <p class="inline-notice">Google verlangt zwei reine Schreibberechtigungen. Ein API-Key ist nicht nötig; OAuth-Tokens bleiben verschlüsselt auf dem Server.</p>
+        <button class="btn primary" type="button" data-action="connect-google-health" ${busy ? "disabled" : ""}>${busy ? "Verbindung wird vorbereitet …" : "Mit Google Health verbinden"}</button>
+      `}
+
+      ${state.googleHealthError ? `<p class="inline-notice warn">${safe(state.googleHealthError)}</p>` : ""}
+      <p class="section-note" style="margin-top: 14px;"><a href="privacy.html">Datenschutzerklärung und übertragene Daten</a></p>
     </section>
   `;
 }
@@ -1092,6 +1195,9 @@ async function handleActionClick(event) {
       state.weightError = null;
       state.lastWeightSyncAt = null;
       state.weightEditId = null;
+      state.googleHealth = emptyGoogleHealthStatus();
+      state.googleHealthLoading = false;
+      state.googleHealthError = null;
       showToast("Von Supabase abgemeldet.");
       await render();
     }
@@ -1105,6 +1211,56 @@ async function handleActionClick(event) {
       await refreshWeightData({ renderAfter: true });
       if (state.weightError) throw new Error(state.weightError);
       showToast("Cloud-Daten aktualisiert.");
+    }
+
+    if (action === "connect-google-health") {
+      state.googleHealthLoading = true;
+      await render();
+      try {
+        await startGoogleHealthConnection();
+      } catch (error) {
+        state.googleHealthLoading = false;
+        await render();
+        throw error;
+      }
+    }
+
+    if (action === "sync-google-health" || action === "retry-google-health") {
+      state.googleHealthLoading = true;
+      await render();
+      try {
+        const result = await syncGoogleHealthNow({ retryFailed: action === "retry-google-health" });
+        state.googleHealth = result.status || state.googleHealth;
+        showToast(`${fmt(result.succeeded || 0, 0)} Google-Health-Einträge synchronisiert.`);
+      } catch (error) {
+        state.googleHealthLoading = false;
+        await render();
+        throw error;
+      }
+      state.googleHealthLoading = false;
+      await render();
+    }
+
+    if (action === "disconnect-google-health" || action === "delete-disconnect-google-health") {
+      const deleteGoogleData = action === "delete-disconnect-google-health";
+      const question = deleteGoogleData
+        ? "Alle von FitTrack geschriebenen Google-Health-Daten löschen und die Verbindung trennen?"
+        : "Google-Health-Zugriff widerrufen und die Verbindung trennen? Bereits übertragene Daten bleiben bei Google.";
+      if (!confirm(question)) return;
+      state.googleHealthLoading = true;
+      await render();
+      try {
+        await disconnectGoogleHealth({ deleteGoogleData });
+        state.googleHealth = emptyGoogleHealthStatus();
+        state.googleHealthError = null;
+        showToast(deleteGoogleData ? "Google-Health-Daten gelöscht und Verbindung getrennt." : "Google Health getrennt.");
+      } catch (error) {
+        state.googleHealthLoading = false;
+        await render();
+        throw error;
+      }
+      state.googleHealthLoading = false;
+      await render();
     }
 
     if (action === "migrate-local-data") {
