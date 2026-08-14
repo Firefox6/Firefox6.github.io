@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">FitTrack Widgets</string>
-    <string name="daily_goals_widget_name">FitTrack Tagesziele (5×1)</string>
-    <string name="compact_calories_widget_name">FitTrack Kalorien kompakt (2×2)</string>
-    <string name="widget_description">Zeigt die heutigen Ernährungsziele aus FitTrack Nutrition.</string>
-</resources>
