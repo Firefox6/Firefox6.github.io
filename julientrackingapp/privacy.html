@@ -22,7 +22,8 @@
           <li>von FitTrack Nutrition erfasste oder importierte Gewichte</li>
           <li>deine aktuelle Körpergrösse</li>
         </ul>
-        <p>Die Übertragung ist ausschliesslich einwegig. FitTrack liest keine Google-Health-Daten. Daten aus Health Connect, Fitness-Apps oder anderen Quellen werden nicht zurück zu Google geschrieben.</p>
+        <p>Im normalen Betrieb ist die Übertragung ausschliesslich einwegig. Wenn du den Historienabgleich ausdrücklich startest und die zusätzliche Leseberechtigung freigibst, liest FitTrack einmalig deine Google-Nutrition-Logs. Dabei werden nur Datenpunkte mit FitTracks eigener Kennung geprüft. FitTrack löscht daraus ausschliesslich Einträge, die von FitTrack erstellt wurden und in deinem Supabase-Konto nicht mehr vorhanden sind. Andere Google-Health-Daten werden weder verändert noch zu FitTrack übernommen.</p>
+        <p>Daten aus Health Connect, Fitness-Apps oder anderen Quellen werden nicht zurück zu Google geschrieben. Der Historienabgleich ist derzeit nur für das dafür freigegebene FitTrack-Konto verfügbar.</p>
         <p>Google-Zugriffstokens werden verschlüsselt serverseitig gespeichert. Google-Client-Secret, Refresh-Token und Supabase-Server-Schlüssel gelangen nie in den Browser.</p>
         <p>Du kannst die Verbindung jederzeit unter «Mehr» trennen. Dabei kannst du wählen, ob die von FitTrack erstellten Google-Health-Daten zuvor gelöscht werden sollen.</p>
       </section>
@@ -31,4 +32,3 @@
     </main>
   </body>
 </html>
-

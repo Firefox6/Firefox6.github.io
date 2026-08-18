@@ -1,6 +1,6 @@
 # AGENTS.md – Projektzentrale für FitTrack Nutrition
 
-Stand: 11. August 2026
+Stand: 18. August 2026
 
 Diese Datei beschreibt den aktuellen Codezustand. Vor grösseren Änderungen zuerst diese Datei und danach die konkret betroffenen Quelldateien lesen. Bei Abweichungen gilt immer der Code; die Dokumentation anschliessend mit aktualisieren.
 
@@ -28,6 +28,7 @@ Die App-Shell ist lokal und cachebar, benötigt für die produktive Nutzung aber
 - supabase-client.js: Öffentliche Supabase-URL und Publishable Key; lädt die festgeschriebene supabase-js-Version dynamisch von JSDelivr und verwaltet den Singleton-Client.
 - supabase-retry.js: DOM-freie Erkennung und begrenzter Retry für den transienten PostgREST-Fehler PGRST303 / JWT issued at future.
 - auth-service.js: Session-Initialisierung, Auth-State, E-Mail/Passwort-Anmeldung, Abmeldung und Verbindungstest.
+- google-health-service.js: Browserseitige OAuth-, Status-, Sofort-Sync- und Trennungsaufrufe für die serverseitige Google-Health-Integration; Datenbank-Trigger und der Minuten-Worker bleiben die verlässliche Outbox-Ebene.
 - cloud-repository.js: Cloud-Repository für Einstellungen, Kalorieneinträge, Presets, Review-Metadaten sowie Import/Export-Orchestrierung.
 - weight-repository.js: Gemeinsames Cloud-Gewichtsrepository mit Quellenpriorität, manueller Nutrition-Erfassung und Importmigrationen.
 - export-import.js: JSON-Export Schema 4, Validierung und Normalisierung alter Backups sowie Merge-, Replace- und Presets-Import.
@@ -53,6 +54,7 @@ Es gibt keine installierten npm-Abhängigkeiten und keinen Build. Zur Laufzeit w
 - @zxing/browser@0.1.5 als Fallback für Barcode-/QR-Scans
 - qrcodejs2-fixes@0.0.2 zur QR-Erzeugung
 - Open Food Facts Schweiz API für Produktdaten nach einem Barcode-Scan
+- Google Health API v4 über Supabase Edge Functions für den optionalen Schreib-Sync von Ernährung, eigenen Gewichten und Profilgrösse sowie den ausdrücklich gestarteten Nutrition-Historienabgleich
 - chatgpt.com als Ziel für den optional kopierten Tageskontext
 
 Der Service Worker cached nur Same-Origin-Assets. Die oben genannten CDN- und API-Aufrufe sind nicht offline verfügbar. Externe Bibliotheken oder APIs nicht stillschweigend ersetzen oder in den Cache aufnehmen.
@@ -99,6 +101,10 @@ Der aktuelle Cloud-Datenbestand umfasst diese Tabellen:
 | food_presets | Wiederverwendbare Lebensmittel-/Portionsvorlagen pro Benutzer |
 | app_metadata | Review-Status, aktuell die letzten täglichen und wöchentlichen Benachrichtigungen |
 | weight_measurements | Gemeinsame Gewichtsmessungen aus Nutrition, Fitness, Health Connect und Importen |
+| google_health_connections | Verschlüsselte Google-Tokens, Scopes, Zeitzone und Verbindungsstatus pro Benutzer |
+| google_health_oauth_states | Kurzlebige, einmalig verwendbare OAuth-State-Datensätze |
+| google_health_sync_queue | Transaktionale Outbox mit upsert/delete-Aufträgen und begrenzten Wiederholungen |
+| google_health_sync_items | Zuordnung einer FitTrack-Entität zum kanonischen Google-Datenpunktnamen |
 
 Die Tabellenschemata, RLS-Policies und Supabase-Migrationen liegen nicht in diesem Repository. Vor jeder Server- oder Schemaänderung zuerst die bestehende Supabase-Konfiguration prüfen. Alle exponierten Tabellen benötigen RLS mit einer echten Besitzprüfung auf user_id; eine clientseitige Filterung ist kein Sicherheitsmechanismus.
 
@@ -110,6 +116,19 @@ Wichtige Regeln:
 - weight_measurements wird von mehreren Anwendungen geteilt. Nutrition darf nur Zeilen mit source = manual_nutrition bearbeiten oder löschen.
 - Für die Anzeige wird pro lokalem Kalendertag eine Gewichtsmessung ausgewählt. Priorität: manual_nutrition, manual_fitness, health_connect, danach andere Quellen; bei gleicher Quelle gewinnt die neuere Messzeit.
 - Die Quelle und externe IDs von Health-/Fitness-Daten nicht überschreiben oder für einen anderen Benutzer wiederverwenden.
+
+### Google-Health-Synchronisierung
+
+Google Health ist im normalen Betrieb ein optionaler, ausschliesslich aus FitTrack heraus schreibender Sync. Die Supabase-Edge-Functions `google-health-oauth-start`, `google-health-oauth-callback`, `google-health-status`, `google-health-sync-now`, `google-health-disconnect` und `google-health-worker` enthalten die serverseitige Integration. Secret Key, Google-Client-Secret, Refresh-Tokens und Token-Verschlüsselungsschlüssel bleiben ausschliesslich serverseitig.
+
+Datenbank-Trigger auf `food_entries`, `weight_measurements` und `app_settings` schreiben Upserts und Löschungen in `google_health_sync_queue`. Der Browser startet nach Mutationen nur einen Best-Effort-Sofortlauf; ein per pg_cron jede Minute aufgerufener Worker übernimmt ausstehende oder wiederholbare Aufträge. Ein Google-Schreibauftrag gilt erst bei einer bestätigten Operation mit `done = true` als erfolgreich. Der von Google zurückgegebene kanonische Datenpunktname wird in `google_health_sync_items` gespeichert und für spätere Änderungen oder Löschungen wiederverwendet.
+
+Queue-Einträge können während eines laufenden Netzwerkaufrufs durch eine neuere Mutation ersetzt werden. Der Worker darf deshalb Erfolg oder Fehler nur für exakt die von ihm beanspruchte Generation quittieren (`id`, `status = processing` und unverändertes `updated_at`). Insbesondere darf ein noch laufender Upsert keinen später eingetroffenen Delete-Auftrag entfernen oder auf fehlgeschlagen setzen.
+
+Nutrition synchronisiert alle FitTrack-Food-Einträge. Bei Gewicht sind nur `manual_nutrition` und `legacy_import` Google-fähig; Daten aus `manual_fitness` und `health_connect` werden nicht zurückgeschrieben. Das Trennen kann optional alle durch FitTrack bekannten Google-Datenpunkte vor dem Token-Widerruf löschen.
+
+Der manuell gestartete Nutrition-Historienabgleich ist serverseitig auf das ausdrücklich freigegebene Julien-Konto begrenzt und benötigt zusätzlich `googlehealth.nutrition.readonly`. OAuth-Start und Callback prüfen diese Kontobindung unabhängig voneinander. Der Abgleich liest die paginierte Google-Liste, betrachtet ausschliesslich Datenpunkt-IDs mit FitTracks eigener `ft-food-`-Kennung, vergleicht sie über die stabile ID mit `food_entries` und löscht nur verwaiste FitTrack-Punkte. Anschliessend wird die Google-Liste erneut gelesen; verbleibende verwaiste Punkte lassen den Ablauf fehlschlagen. Das Ergebnis wird unter `google_health_last_food_reconcile` in `app_metadata` gespeichert. Fehlende aktuelle Supabase-Einträge werden durch den nachfolgenden Initial-Outbox-Lauf erneut geschrieben. Andere Nutzer dürfen durch diesen Abgleich weder OAuth-Berechtigungen erhalten noch Google-Aufrufe oder Queue-Jobs auslösen.
+
 ## Lokale Daten, Snapshots und Migration
 
 db.js verwendet weiterhin die Datenbank julien_tracking_db mit DB_VERSION = 3. Die Stores meta, backups, settings, weight_entries, food_entries, food_presets, workouts und exercise_presets bleiben aus Kompatibilitätsgründen erhalten.
@@ -244,7 +263,7 @@ Gewichte aus älteren Backups erhalten beim Import stabile externe IDs. Dadurch 
 
 ## PWA und Service Worker
 
-service-worker.js definiert APP_VERSION = 2026-08-11-supabase-jwt-retry-v2. Der Cache enthält alle lokalen Module, die Shell, Manifest und fünf Icons.
+service-worker.js definiert APP_VERSION = 2026-08-18-google-health-food-reconcile-v1. Der Cache enthält alle lokalen Module, die Shell, Manifest und fünf Icons.
 
 - Navigation: network-first mit Cache-/index.html-Fallback.
 - Andere Same-Origin-GET-Requests: cache-first.

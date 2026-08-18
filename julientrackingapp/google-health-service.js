@@ -15,13 +15,14 @@ export async function getGoogleHealthStatus() {
   return invoke("google-health-status", {});
 }
 
-export async function startGoogleHealthConnection() {
+export async function startGoogleHealthConnection({ reconcileFoodHistory = false } = {}) {
   const returnUrl = new URL(window.location.href);
   returnUrl.searchParams.delete("google_health");
   returnUrl.hash = "";
   const result = await invoke("google-health-oauth-start", {
     timezone: resolvedTimezone(),
     return_url: returnUrl.toString(),
+    reconcile_food_history: reconcileFoodHistory,
   });
   if (!result?.authorization_url) throw new Error("Google-Autorisierungslink fehlt.");
   window.location.assign(result.authorization_url);
@@ -83,4 +84,3 @@ function resolvedTimezone() {
     return "Europe/Zurich";
   }
 }
-

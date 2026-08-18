@@ -159,8 +159,9 @@ async function init() {
   if (googleHealthReturnStatus) {
     const messages = {
       connected: "Google Health wurde verbunden. Der Erstabgleich läuft.",
+      reconciled: "Google-Health-Historie wurde mit FitTrack abgeglichen.",
       denied: "Google-Health-Verbindung wurde abgebrochen.",
-      "partial-consent": "Für die Synchronisierung müssen beide Schreibberechtigungen freigegeben werden.",
+      "partial-consent": "Die benötigten Google-Health-Berechtigungen wurden nicht vollständig freigegeben.",
       error: "Google Health konnte nicht verbunden werden.",
     };
     showToast(messages[googleHealthReturnStatus] || "Google-Health-Status aktualisiert.");
@@ -861,6 +862,7 @@ function renderGoogleHealth() {
   const health = state.googleHealth || emptyGoogleHealthStatus();
   const connected = health.connected === true;
   const needsReconnect = health.status === "reauth_required";
+  const reconcileResult = health.last_food_reconcile;
   const statusLabel = !connected
     ? "Nicht verbunden"
     : needsReconnect
@@ -873,7 +875,7 @@ function renderGoogleHealth() {
       <div class="section-head">
         <div>
           <h2>Google Health</h2>
-          <p class="section-note">Einweg-Synchronisierung: FitTrack schreibt Ernährung, eigene Gewichte und Grösse. Es werden keine Google-Health-Daten gelesen.</p>
+          <p class="section-note">FitTrack schreibt Ernährung, eigene Gewichte und Grösse. Google-Nutrition-Logs werden nur beim manuell gestarteten Historienabgleich gelesen.</p>
         </div>
         <span class="pill ${connected && !needsReconnect ? "ok" : needsReconnect ? "warn" : ""}">${safe(statusLabel)}</span>
       </div>
@@ -886,11 +888,13 @@ function renderGoogleHealth() {
           ${renderMetric("Letzter Erfolg", health.last_success_at ? formatDateTime(health.last_success_at) : "–", health.timezone || "Europe/Zurich")}
         </div>
         ${health.last_error ? `<p class="inline-notice warn">${safe(health.last_error)}</p>` : ""}
+        ${reconcileResult ? `<p class="inline-notice">Letzter Historienabgleich: ${safe(formatDateTime(reconcileResult.completed_at))}. ${fmt(reconcileResult.google_fittrack_entries || 0, 0)} FitTrack-Einträge bei Google geprüft, ${fmt(reconcileResult.deleted_stale_entries || 0, 0)} alte Einträge gelöscht und ${fmt(reconcileResult.missing_current_entries || 0, 0)} aktuelle Einträge erneut eingeplant.</p>` : ""}
         <div class="button-row" style="margin-top: 14px;">
           ${needsReconnect
             ? `<button class="btn primary" type="button" data-action="connect-google-health" ${busy ? "disabled" : ""}>Erneut verbinden</button>`
             : `<button class="btn primary" type="button" data-action="sync-google-health" ${busy ? "disabled" : ""}>${busy ? "Synchronisiere …" : "Jetzt synchronisieren"}</button>`}
           ${health.failed ? `<button class="btn ghost" type="button" data-action="retry-google-health" ${busy ? "disabled" : ""}>Fehler erneut versuchen</button>` : ""}
+          ${health.can_reconcile_food_history ? `<button class="btn ghost" type="button" data-action="reconcile-google-health-food" ${busy ? "disabled" : ""}>Historie abgleichen</button>` : ""}
           <button class="btn ghost" type="button" data-action="disconnect-google-health" ${busy ? "disabled" : ""}>Nur Verbindung trennen</button>
           <button class="btn danger" type="button" data-action="delete-disconnect-google-health" ${busy ? "disabled" : ""}>Google-Daten löschen &amp; trennen</button>
         </div>
@@ -1218,6 +1222,19 @@ async function handleActionClick(event) {
       await render();
       try {
         await startGoogleHealthConnection();
+      } catch (error) {
+        state.googleHealthLoading = false;
+        await render();
+        throw error;
+      }
+    }
+
+    if (action === "reconcile-google-health-food") {
+      if (!confirm("Google-Nutrition-Logs lesen und alle von FitTrack erstellten Essenseinträge löschen, die nicht mehr in Supabase vorhanden sind?")) return;
+      state.googleHealthLoading = true;
+      await render();
+      try {
+        await startGoogleHealthConnection({ reconcileFoodHistory: true });
       } catch (error) {
         state.googleHealthLoading = false;
         await render();
