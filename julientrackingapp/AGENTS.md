@@ -127,7 +127,9 @@ Queue-Einträge können während eines laufenden Netzwerkaufrufs durch eine neue
 
 Nutrition synchronisiert alle FitTrack-Food-Einträge. Bei Gewicht sind nur `manual_nutrition` und `legacy_import` Google-fähig; Daten aus `manual_fitness` und `health_connect` werden nicht zurückgeschrieben. Das Trennen kann optional alle durch FitTrack bekannten Google-Datenpunkte vor dem Token-Widerruf löschen.
 
-Der manuell gestartete Nutrition-Historienabgleich ist serverseitig auf das ausdrücklich freigegebene Julien-Konto begrenzt und benötigt zusätzlich `googlehealth.nutrition.readonly`. OAuth-Start und Callback prüfen diese Kontobindung unabhängig voneinander. Der Abgleich liest die paginierte Google-Liste, betrachtet ausschliesslich Datenpunkt-IDs mit FitTracks eigener `ft-food-`-Kennung, vergleicht sie über die stabile ID mit `food_entries` und löscht nur verwaiste FitTrack-Punkte. Anschliessend wird die Google-Liste erneut gelesen; verbleibende verwaiste Punkte lassen den Ablauf fehlschlagen. Das Ergebnis wird unter `google_health_last_food_reconcile` in `app_metadata` gespeichert. Fehlende aktuelle Supabase-Einträge werden durch den nachfolgenden Initial-Outbox-Lauf erneut geschrieben. Andere Nutzer dürfen durch diesen Abgleich weder OAuth-Berechtigungen erhalten noch Google-Aufrufe oder Queue-Jobs auslösen.
+Der manuell gestartete Nutrition-Historienabgleich ist serverseitig auf das ausdrücklich freigegebene Julien-Konto begrenzt und benötigt zusätzlich `googlehealth.nutrition.readonly`. OAuth-Start und Callback prüfen diese Kontobindung unabhängig voneinander. Der Abgleich liest die paginierte Google-Liste und betrachtet ausschliesslich Nutrition-Punkte, deren von Google gesetztes `dataSource.application.googleWebClientId` dem FitTrack-OAuth-Client entspricht. Aktuelle Punkte werden über die in `google_health_sync_items` gespeicherten kanonischen Google-Namen mit `food_entries` abgeglichen; andere Google- oder Health-Connect-Einträge bleiben unberührt. Verwaiste sowie ältere doppelte FitTrack-Punkte werden gelöscht und die Google-Liste wird danach erneut gelesen; verbleibende verwaiste Punkte lassen den Ablauf fehlschlagen. Das versionierte Ergebnis wird unter `google_health_last_food_reconcile` in `app_metadata` gespeichert. Fehlende aktuelle Supabase-Einträge werden über die Outbox erneut geschrieben und nach leerer Food-Warteschlange mit einem abschliessenden Kontrolllauf bestätigt. Andere Nutzer dürfen durch diesen Abgleich weder OAuth-Berechtigungen erhalten noch Google-Aufrufe oder Queue-Jobs auslösen.
+
+Da die Google-Health-Edge-Functions mit der serverseitigen `service_role` auf das Abgleichresultat zugreifen, benötigt `app_metadata` für diese Rolle mindestens `SELECT`, `INSERT` und `UPDATE`. RLS bleibt für normale Clients unverändert aktiv; die Berechtigung darf nicht durch einen Secret Key im Frontend ersetzt werden.
 
 ## Lokale Daten, Snapshots und Migration
 
@@ -232,6 +234,10 @@ Mehr:
 - JSON-Export und Import
 
 Benachrichtigungen werden nur geprüft, solange die App offen ist. Die App erzeugt keine verlässlichen Hintergrund-Erinnerungen, wenn sie vollständig geschlossen ist.
+
+## Offene Produkt-TODOs
+
+- `Gestern kopieren` überarbeiten: Nach dem Öffnen alle Einträge des Vortags als Liste anzeigen, daraus genau einen Eintrag auswählen und diesen gezielt auf den ausgewählten Tag kopieren. Wiederholtes Kopieren desselben Eintrags muss möglich bleiben.
 
 ## Import und Export
 
